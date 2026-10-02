@@ -11,7 +11,7 @@ export default defineConfig({
       kind: "backend",
       id: "awesome-tls-backend",
       root: "packages/backend",
-      assets: ["./assets/bin/*"],
+      assets: ["packages/backend/assets/bin/*"],
     },
     {
       kind: "frontend",

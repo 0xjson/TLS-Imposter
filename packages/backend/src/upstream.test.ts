@@ -3,11 +3,15 @@ import { describe, expect, it, vi } from "vitest";
 import { makeUpstreamHandler } from "./upstream";
 import { DEFAULTS, type Settings } from "./settings";
 
-type FakeConn = { send: ReturnType<typeof vi.fn>; receive: ReturnType<typeof vi.fn> };
+type FakeConn = {
+  send: ReturnType<typeof vi.fn<(bytes: string) => Promise<void>>>;
+  receive: ReturnType<typeof vi.fn>;
+};
 
 function fakeSdk(conn: FakeConn) {
   return {
-    net: { connect: vi.fn(async () => conn) },
+    // Typed parameter so mock.calls[0] is a one-element tuple rather than [].
+    net: { connect: vi.fn(async (_target: string) => conn) },
     console: { log: vi.fn(), warn: vi.fn(), error: vi.fn() },
   };
 }
@@ -48,7 +52,7 @@ function deps(
 
 describe("upstream handler", () => {
   it("returns a loopback connection with the preamble already written", async () => {
-    const conn: FakeConn = { send: vi.fn(async () => {}), receive: vi.fn() };
+    const conn: FakeConn = { send: vi.fn(async (_bytes: string) => {}), receive: vi.fn() };
     const sdk = fakeSdk(conn);
     const handler = makeUpstreamHandler(deps());
 
@@ -74,7 +78,7 @@ describe("upstream handler", () => {
   // The whole point: the SDK types say `tls`, the runtime says `isTLS`.
   // Reading the wrong one sends every HTTPS request as plaintext.
   it("reads isTLS from the runtime object, not the typed tls field", async () => {
-    const conn: FakeConn = { send: vi.fn(async () => {}), receive: vi.fn() };
+    const conn: FakeConn = { send: vi.fn(async (_bytes: string) => {}), receive: vi.fn() };
     const handler = makeUpstreamHandler(deps());
     await handler(
       fakeSdk(conn) as never,
@@ -86,7 +90,7 @@ describe("upstream handler", () => {
   });
 
   it("passes the target's own port and TLS flag through", async () => {
-    const conn: FakeConn = { send: vi.fn(async () => {}), receive: vi.fn() };
+    const conn: FakeConn = { send: vi.fn(async (_bytes: string) => {}), receive: vi.fn() };
     const handler = makeUpstreamHandler(deps());
     await handler(
       fakeSdk(conn) as never,
@@ -99,7 +103,7 @@ describe("upstream handler", () => {
   });
 
   it("forwards an SNI override from the runtime SNI field", async () => {
-    const conn: FakeConn = { send: vi.fn(async () => {}), receive: vi.fn() };
+    const conn: FakeConn = { send: vi.fn(async (_bytes: string) => {}), receive: vi.fn() };
     const handler = makeUpstreamHandler(deps());
     await handler(
       fakeSdk(conn) as never,
@@ -111,7 +115,7 @@ describe("upstream handler", () => {
   });
 
   it("routes to the 502 responder when the helper is down, not to the target", async () => {
-    const conn: FakeConn = { send: vi.fn(async () => {}), receive: vi.fn() };
+    const conn: FakeConn = { send: vi.fn(async (_bytes: string) => {}), receive: vi.fn() };
     const sdk = fakeSdk(conn);
     const handler = makeUpstreamHandler(deps({ endpoint: null }));
 
@@ -130,7 +134,7 @@ describe("upstream handler", () => {
   });
 
   it("throws only when the responder is also unavailable", async () => {
-    const conn: FakeConn = { send: vi.fn(async () => {}), receive: vi.fn() };
+    const conn: FakeConn = { send: vi.fn(async (_bytes: string) => {}), receive: vi.fn() };
     const sdk = fakeSdk(conn);
     const handler = makeUpstreamHandler(deps({ endpoint: null, fallbackPort: null }));
 
@@ -140,9 +144,9 @@ describe("upstream handler", () => {
   });
 
   it("propagates a connect failure rather than returning undefined", async () => {
-    const conn: FakeConn = { send: vi.fn(async () => {}), receive: vi.fn() };
+    const conn: FakeConn = { send: vi.fn(async (_bytes: string) => {}), receive: vi.fn() };
     const sdk = fakeSdk(conn);
-    sdk.net.connect = vi.fn(async () => {
+    sdk.net.connect = vi.fn(async (_target: string) => {
       throw new Error("ECONNREFUSED");
     });
     const handler = makeUpstreamHandler(deps());
@@ -154,7 +158,7 @@ describe("upstream handler", () => {
 
   it("propagates a preamble write failure", async () => {
     const conn: FakeConn = {
-      send: vi.fn(async () => {
+      send: vi.fn(async (_bytes: string) => {
         throw new Error("broken pipe");
       }),
       receive: vi.fn(),
@@ -167,7 +171,7 @@ describe("upstream handler", () => {
   });
 
   it("never logs the token", async () => {
-    const conn: FakeConn = { send: vi.fn(async () => {}), receive: vi.fn() };
+    const conn: FakeConn = { send: vi.fn(async (_bytes: string) => {}), receive: vi.fn() };
     const d = deps({ endpoint: { port: 51234, token: "SUPERSECRET" } });
     const handler = makeUpstreamHandler(d);
     await handler(fakeSdk(conn) as never, fakeRequest({ host: "h", port: 443, tls: true }) as never);
@@ -176,7 +180,7 @@ describe("upstream handler", () => {
   });
 
   it("survives a getInfo that throws, still denying the request", async () => {
-    const conn: FakeConn = { send: vi.fn(async () => {}), receive: vi.fn() };
+    const conn: FakeConn = { send: vi.fn(async (_bytes: string) => {}), receive: vi.fn() };
     const sdk = fakeSdk(conn);
     const handler = makeUpstreamHandler(deps({ endpoint: null }));
     const broken = {
