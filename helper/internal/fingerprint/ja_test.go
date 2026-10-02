@@ -364,6 +364,18 @@ func TestAnalyzeAcceptsTheRecordedChromeHello(t *testing.T) {
 	if !strings.HasPrefix(info.JA4, "t13d") {
 		t.Errorf("JA4 = %q, want a TLS 1.3 TCP hello with SNI", info.JA4)
 	}
-	// Freeze the values once confirmed against an external reporter in Task 19.
-	t.Logf("recorded chrome hello: ja3=%s ja4=%s", info.JA3, info.JA4)
+	// Frozen regression vector. These exact values were reported by
+	// tls.peet.ws for a request sent through the shipped Windows helper with
+	// profile chrome_150, confirming both implementations against an external
+	// authority rather than against themselves.
+	const (
+		wantJA3 = "f984bd5bc7358922cde86ed4471a2e89"
+		wantJA4 = "t13d1516h2_8daaf6152771_806a8c22fdea"
+	)
+	if info.JA3 != wantJA3 {
+		t.Errorf("JA3 = %q, want the externally confirmed %q", info.JA3, wantJA3)
+	}
+	if info.JA4 != wantJA4 {
+		t.Errorf("JA4 = %q, want the externally confirmed %q", info.JA4, wantJA4)
+	}
 }
