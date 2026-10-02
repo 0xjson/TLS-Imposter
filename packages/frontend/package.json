@@ -4,10 +4,17 @@
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
-    "typecheck": "tsc --noEmit"
+    "typecheck": "vue-tsc --noEmit"
+  },
+  "dependencies": {
+    "vue": "^3.5.0"
   },
   "devDependencies": {
+    "@caido/quickjs-types": "0.26.0",
+    "@caido/sdk-backend": "0.58.3",
     "@caido/sdk-frontend": "0.58.3",
-    "typescript": "^5.6.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.6.0",
+    "vue-tsc": "^2.1.0"
   }
 }

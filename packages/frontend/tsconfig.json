@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noUncheckedIndexedAccess": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "jsx": "preserve",
+    // The page imports the backend's API and DTO types, which pulls backend
+    // source into this compile, so the backend's ambient module declarations
+    // (caido:plugin, caido:utils) must be in scope here too.
+    "types": ["node", "@caido/sdk-backend", "@caido/quickjs-types"]
+  },
+  "include": ["src/**/*.ts", "src/**/*.vue", "../backend/src/**/*.ts"],
+  "exclude": ["../backend/src/**/*.test.ts"]
+}
