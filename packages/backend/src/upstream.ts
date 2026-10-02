@@ -17,8 +17,11 @@ export type UpstreamDeps = {
     state: () => { kind: string };
   };
   settings: { get(): Settings };
-  /** Port of the 502 responder, or null if it could not be started. */
-  fallbackPort: () => number | null;
+  /**
+   * Opens a one-shot 502 responder and returns its loopback port, or null if
+   * one could not be opened.
+   */
+  openDenial: () => Promise<number | null>;
   log: (level: "info" | "warn" | "error", msg: string) => void;
 };
 
@@ -56,11 +59,11 @@ export function makeUpstreamHandler(deps: UpstreamDeps) {
       // undefined denies the request: Caido logs the error and then sends it
       // itself with its own fingerprint. Handing back a connection to our own
       // 502 responder is the only way to stop it leaving the machine.
-      const port = deps.fallbackPort();
+      const port = await deps.openDenial();
       if (port === null) {
         throw new Error(
           `Awesome TLS: helper is down (${deps.helper.state().kind}) and the ` +
-            `fallback responder is unavailable; request may leave unspoofed`,
+            `502 responder could not be opened; request may leave unspoofed`,
         );
       }
       deps.log(

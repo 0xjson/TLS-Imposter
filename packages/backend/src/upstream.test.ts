@@ -40,7 +40,7 @@ function deps(
     overrides.endpoint === undefined ? { port: 51234, token: "tok" } : overrides.endpoint;
   const fallbackPort = overrides.fallbackPort === undefined ? 59999 : overrides.fallbackPort;
   return {
-    fallbackPort: () => fallbackPort,
+    openDenial: async () => fallbackPort,
     helper: {
       endpoint: () => endpoint,
       state: () => ({ kind: "running" as const }),
@@ -140,7 +140,7 @@ describe("upstream handler", () => {
 
     await expect(
       handler(sdk as never, fakeRequest({ host: "h", port: 443, tls: true }) as never),
-    ).rejects.toThrow(/fallback responder/i);
+    ).rejects.toThrow(/502 responder/i);
   });
 
   it("propagates a connect failure rather than returning undefined", async () => {

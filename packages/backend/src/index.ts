@@ -6,7 +6,7 @@ import type { DefineAPI, DefineEvents, SDK } from "caido:plugin";
 import { spawn } from "child_process";
 import { join } from "path";
 
-import { startFallbackResponder, type FallbackResponder } from "./fallback";
+import { openOneShot502 } from "./fallback";
 import { HelperManager, type CaptureState, type ChildHandle, type HelperState } from "./helper";
 import { enableForAllDomains, findBackendPluginId, readRule, type UpstreamRule } from "./routing";
 import { SettingsStore, type DeepPartial, type Settings } from "./settings";
@@ -61,7 +61,6 @@ export function init(sdk: SDK<API, BackendEvents>) {
   let capture: CaptureState = { state: "stopped" };
   let routing: UpstreamRule | null = null;
   let warnings: string[] = [];
-  let fallback: FallbackResponder | null = null;
 
   const log = (level: "info" | "warn" | "error", msg: string) => {
     if (level === "error") sdk.console.error(msg);
@@ -73,7 +72,9 @@ export function init(sdk: SDK<API, BackendEvents>) {
     q: string,
     v?: Record<string, unknown>,
   ) => Promise<{ data?: T; errors?: { message: string }[] }> = (q, v) =>
-    sdk.graphql.execute(q, v) as never;
+    // Caido rejects an undefined variables argument with "GraphQL variables
+    // must be an object", so a query without variables still needs {}.
+    sdk.graphql.execute(q, v ?? {}) as never;
 
   const validateOptions = () => {
     const state = helper.state();
@@ -134,22 +135,24 @@ export function init(sdk: SDK<API, BackendEvents>) {
     log,
   });
 
-  // The deny mechanism must exist before the hook is registered, or an early
-  // request arriving while the helper is still starting has nothing to be
-  // denied by.
-  void startFallbackResponder(log)
-    .then((r) => {
-      fallback = r;
-      log("info", `Awesome TLS: 502 responder on 127.0.0.1:${r.port}`);
-    })
-    .catch((err) => {
-      log("error", `Awesome TLS: no 502 responder: ${String(err)}`);
-    });
+  // The deny mechanism is opened per denied request rather than held open.
+  // The backend SDK has no unload hook, so a long-lived listener could never
+  // be released; one leaked here and appeared to wedge Caido's backend while
+  // it was stopping the plugin.
+  const openDenial = async (): Promise<number | null> => {
+    try {
+      const r = await openOneShot502(log);
+      return r.port;
+    } catch (err) {
+      log("error", `Awesome TLS: could not open a 502 responder: ${String(err)}`);
+      return null;
+    }
+  };
 
   registerUpstream(sdk, {
     helper,
     settings: store,
-    fallbackPort: () => fallback?.port ?? null,
+    openDenial,
     log,
   });
 
@@ -196,16 +199,35 @@ export function init(sdk: SDK<API, BackendEvents>) {
     return snapshot();
   });
 
-  // Boot: settings first so the hook has something to read, then the helper.
+  // Boot in independent phases, each guarded.
+  //
+  // The helper is the critical path, so nothing optional may run before it or
+  // be able to prevent it starting: an unguarded failure here leaves the UI
+  // reporting "stopped" forever with no explanation.
   void (async () => {
-    warnings = await store.load({ profiles: [], fallbackProfile: store.get().profile });
-
-    const pluginId = await findBackendPluginId(graphql, sdk.meta.id());
-    if (pluginId !== null) {
-      routing = await readRule(graphql, pluginId);
+    try {
+      warnings = await store.load({ profiles: [], fallbackProfile: store.get().profile });
+    } catch (err) {
+      warnings = [`settings could not be loaded: ${String(err)}`];
+      log("error", `Awesome TLS: ${warnings[0]}`);
     }
 
-    await helper.start();
+    try {
+      await helper.start();
+    } catch (err) {
+      log("error", `Awesome TLS: helper failed to start: ${String(err)}`);
+    }
     publish();
+
+    // Routing discovery is cosmetic: it only populates the status card.
+    try {
+      const pluginId = await findBackendPluginId(graphql, sdk.meta.id());
+      if (pluginId !== null) {
+        routing = await readRule(graphql, pluginId);
+        publish();
+      }
+    } catch (err) {
+      log("warn", `Awesome TLS: could not read the routing rule: ${String(err)}`);
+    }
   })();
 }
