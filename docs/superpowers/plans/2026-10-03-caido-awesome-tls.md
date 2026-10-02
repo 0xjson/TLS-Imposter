@@ -3762,12 +3762,24 @@ func Relay(client net.Conn, cfg *preamble.Config, req *httpwire.Request) error {
 
 	var upstream net.Conn = raw
 	if cfg.Target.TLS {
+		// specFor returns nil for a named-ID-only profile; then uTLS builds the
+		// hello from the ID and its forceHttp1 argument rewrites ALPN for us.
+		id := utls.HelloCustom
+		if spec == nil {
+			p, ok := fingerprint.Lookup(cfg.Profile)
+			if !ok {
+				return fmt.Errorf("relay: unknown profile %q", cfg.Profile)
+			}
+			id = p.GetClientHelloId()
+		}
 		uconn := utls.UClient(raw, &utls.Config{
 			ServerName:         cfg.ServerName(),
 			InsecureSkipVerify: true,
-		}, utls.HelloCustom, false, true, true)
-		if err := uconn.ApplyPreset(spec); err != nil {
-			return fmt.Errorf("relay: apply client hello: %w", err)
+		}, id, false, true, true)
+		if spec != nil {
+			if err := uconn.ApplyPreset(spec); err != nil {
+				return fmt.Errorf("relay: apply client hello: %w", err)
+			}
 		}
 		if err := uconn.Handshake(); err != nil {
 			return fmt.Errorf("relay: tls handshake with %s: %w", cfg.Addr(), err)
@@ -3799,6 +3811,7 @@ func Relay(client net.Conn, cfg *preamble.Config, req *httpwire.Request) error {
 //
 // The fork's own forceHttp1 flag only rewrites ALPN for named presets, not for
 // HelloCustom specs, so the rewrite happens here for both cases.
+// Returns (nil, nil) when the profile has no inspectable spec; see Relay.
 func specFor(cfg *preamble.Config) (*utls.ClientHelloSpec, error) {
 	var spec *utls.ClientHelloSpec
 
@@ -3812,6 +3825,14 @@ func specFor(cfg *preamble.Config) (*utls.ClientHelloSpec, error) {
 		profile, ok := fingerprint.Lookup(cfg.Profile)
 		if !ok {
 			return nil, fmt.Errorf("relay: unknown profile %q", cfg.Profile)
+		}
+		// 27 of the 83 bundled profiles carry a named uTLS ClientHelloID whose
+		// ToSpec is unimplemented (Task 6). uTLS resolves those itself during
+		// the handshake, so return nil and let the caller hand uTLS the named
+		// ID with its own forceHttp1 flag, which is the one case where that
+		// flag rewrites ALPN.
+		if !fingerprint.HasDirectSpec(cfg.Profile) {
+			return nil, nil
 		}
 		s, err := profile.GetClientHelloSpec()
 		if err != nil {
