@@ -520,3 +520,66 @@ Also settled here: probe question 7. The `-H windowsgui` binary
 (`PE32+ ... (GUI), x86-64`, 11.4 MB) receives its `ready` line over a pipe in
 0.23 s and exits with code 0 when stdin closes, so the GUI subsystem does not
 break stdio and the helper cannot outlive the plugin.
+
+### 11.3.2 Acceptance through Caido (2026-10-03, Task 19)
+
+Plugin installed in Caido 0.58.3 on Windows, upstream rule `allowlist: ["*"]`,
+request to `https://tls.peet.ws/api/all` through Caido's proxy.
+
+| | Plugin off (Caido's own stack) | Plugin on |
+|---|---|---|
+| `http_version` | **HTTP/1.1** | **h2** |
+| `tls.ja3_hash` | `c199b43d41b470f8f68c5561f8f1ce3e` | `f984bd5bc7358922cde86ed4471a2e89` |
+| `tls.ja4` | `t13d3111_e8f1e7e78f70_24695f2957a7` | `t13d1516h2_8daaf6152771_806a8c22fdea` |
+| `tls.peetprint_hash` | `5d70f9266079843b0c0824fd3005e65d` | `67c3e9111bed9e7f03d2f21d6d88994b` |
+| `http2.akamai_fingerprint_hash` | *(absent — no HTTP/2)* | `52d84b11737d980aef856699f885ca86` |
+
+The plugin-on values are **identical** to those measured by driving the helper
+directly (11.3.1), so routing through Caido does not perturb the fingerprint.
+
+Why the baseline is bad for its stated purpose: Caido natively offers 31 ciphers
+and 11 extensions with **no ALPN**, negotiates HTTP/1.1, and presents no HTTP/2
+fingerprint at all — while sending a Chrome `User-Agent`. That combination is
+self-contradictory and trivially separable from a browser.
+
+Confirmed alongside it:
+
+- **HTTP/2 pseudo-header order** reaches the wire as `:method, :authority,
+  :scheme, :path` — Chrome's order; Firefox's differs — so the profile's HTTP/2
+  layer is applied, not just its ClientHello.
+- **Request header order** is preserved: `user-agent, accept, accept-language,
+  accept-encoding`, exactly as written.
+- **GREASE, X25519MLKEM768 key share and `application_settings` (ALPS)** all
+  appear in the reported ClientHello, as current Chrome sends.
+
+#### Fail-closed, and what it cost to learn
+
+With the helper killed and its binary moved aside so it could not respawn, the
+plugin logged `helper down; answering 502` and **the request never reached the
+target** — Caido returned its own error page, not the site's response. The
+security property holds.
+
+Getting there exposed four defects that every unit test had passed:
+
+1. **Boot order.** `helper.start()` ran after a settings load and two GraphQL
+   calls, unguarded. `sdk.graphql.execute` rejects an `undefined` variables
+   argument ("GraphQL variables must be an object"), so the helper never
+   started and nothing was logged — the UI would have shown "stopped" forever.
+   Boot now runs in guarded phases, helper first.
+2. **Answer-before-read.** Caido writes the request into the supplied
+   connection and then reads; answering first makes it discard the reply.
+3. **Self-close aborts.** Ending the socket produces `os error 10053` and Caido
+   serves its own 400 instead of relaying the 502. The responder now writes a
+   keep-alive response and lets the peer close — the shape the Task 1 probe
+   used, which Caido relayed correctly.
+4. **No unload hook.** The backend SDK's only events are `onInterceptRequest`,
+   `onInterceptResponse`, `onProjectChange` and `onUpstream`; there is no
+   unload or shutdown callback. A listener created in `init` can therefore
+   never be deliberately released. The long-lived 502 listener leaked and
+   **Caido's backend process died while stopping the plugin**. The responder is
+   now opened per denied request and closes itself after one connection, so a
+   healthy helper leaves no extra socket open at all.
+
+Item 4 is the general lesson for this plugin: anything it opens must be either
+short-lived or owned by the helper process, because the plugin gets no chance
+to clean up.
