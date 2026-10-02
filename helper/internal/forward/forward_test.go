@@ -221,8 +221,7 @@ func TestSendReportsTheStatusReason(t *testing.T) {
 
 func TestSendSurfacesDialFailures(t *testing.T) {
 	cfg := &preamble.Config{
-		// Port 1 on loopback refuses connections.
-		Target:     preamble.Target{Host: "127.0.0.1", Port: 1, TLS: true},
+		Target:     preamble.Target{Host: "127.0.0.1", Port: refusedPort(t), TLS: true},
 		Profile:    "chrome_150",
 		TimeoutSec: 5,
 	}
