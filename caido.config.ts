@@ -1,4 +1,5 @@
 import { defineConfig } from "@caido-community/dev";
+import vue from "@vitejs/plugin-vue";
 
 export default defineConfig({
   id: "awesome-tls",
@@ -18,6 +19,9 @@ export default defineConfig({
       id: "awesome-tls-frontend",
       root: "packages/frontend",
       backend: { id: "awesome-tls-backend" },
+      // Vite needs this to compile .vue single-file components; without it the
+      // build fails in rollup with "content contains invalid JS syntax".
+      vite: { plugins: [vue()] },
     },
   ],
 });

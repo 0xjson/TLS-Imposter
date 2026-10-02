@@ -155,7 +155,7 @@ export function init(sdk: SDK<API, BackendEvents>) {
 
   sdk.api.register("getState", () => snapshot());
 
-  sdk.api.register("updateSettings", async (_sdk, patch: DeepPartial<Settings>) => {
+  sdk.api.register("updateSettings", async (_sdk: SDK, patch: DeepPartial<Settings>) => {
     const before = store.get();
     warnings = await store.update(patch, validateOptions());
     const after = store.get();
