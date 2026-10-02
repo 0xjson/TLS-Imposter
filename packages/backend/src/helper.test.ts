@@ -1,5 +1,4 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { EventEmitter } from "node:events";
 
 import {
   BACKOFF_MS,
@@ -9,13 +8,38 @@ import {
   type ChildHandle,
 } from "./helper";
 
+/**
+ * A minimal emitter. @caido/quickjs-types declares its own "events" module,
+ * which shadows @types/node's EventEmitter and leaves it without members, so
+ * the tests carry their own rather than depending on which one wins.
+ */
+class Emitter {
+  // `any` here is deliberate: ChildHandle declares narrow per-event callback
+  // signatures, and a single generic handler type cannot be assignable to all
+  // of them at once.
+  /* eslint-disable @typescript-eslint/no-explicit-any */
+  private handlers = new Map<string, ((...args: any[]) => void)[]>();
+
+  on(event: string, cb: (...args: any[]) => void): this {
+    const list = this.handlers.get(event) ?? [];
+    list.push(cb);
+    this.handlers.set(event, list);
+    return this;
+  }
+
+  emit(event: string, ...args: any[]): void {
+    for (const cb of [...(this.handlers.get(event) ?? [])]) cb(...args);
+  }
+  /* eslint-enable @typescript-eslint/no-explicit-any */
+}
+
 /** A scriptable stand-in for the helper process. */
-class FakeChild extends EventEmitter implements ChildHandle {
+class FakeChild extends Emitter implements ChildHandle {
   readonly written: string[] = [];
   killed = false;
   stdinClosed = false;
-  readonly stdout = new EventEmitter();
-  readonly stderr = new EventEmitter();
+  readonly stdout = new Emitter();
+  readonly stderr = new Emitter();
 
   write(line: string): void {
     this.written.push(line);
