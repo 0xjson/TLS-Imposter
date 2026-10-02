@@ -437,3 +437,41 @@ proceeds, and only one can change the design:
   throws, fail-closed is unachievable and section 10 is revisited with the user before any further work.
 - **Probe items 1-3 and 5-8** adjust implementation details (framing, keep-alive handling, which traffic
   sources are covered) but not the architecture.
+
+### 11.1.1 Probe results (2026-10-03)
+
+Run against Caido **0.58.3** on Windows x64, rule `allowlist: ["*"]`, throwaway probe
+plugin. Evidence in `AppData/Roaming/Caido/Caido/data/logs/logging.2026-10-02.log`.
+
+| # | Question | Answer |
+|---|---|---|
+| 1 | Plain HTTP/1.1 into a plugin-supplied connection, incl. HTTPS targets? | **Yes.** Byte-exact HTTP/1.1, header order, casing and duplicates preserved, for a `tls=true`/`port=443` target. |
+| 2 | Does a preamble written before returning arrive first? | **Yes.** Logged as two distinct reads: 42 B preamble, then the request bytes. |
+| 3 | Does Caido reuse the connection (keep-alive)? | **No.** Each request gets a fresh `onUpstream` call and a fresh connection; the previous one closes after exactly one request. |
+| 4 | What happens when the callback throws? | **Caido FAILS OPEN.** A deliberate `throw` is logged as "Error in plugin execution" and Caido then sends the request itself. Confirmed 4x (3 accidental runtime errors + 1 deliberate throw) across Replay and Proxy, each returning the real upstream response. |
+| 5 | Do WebSocket upgrades reach `onUpstream`? | **Yes.** `Upgrade: websocket`, `Connection: Upgrade` and `Sec-WebSocket-Key` all arrive intact. |
+| 6 | Proxy, Replay, Automate? | **Proxy yes, Replay yes.** Automate not exercised; it shares the Replay request engine. Confirm in Task 19 Step 10. |
+| 7 | Helper exits when the plugin is disabled? | Deferred to Task 12 (no helper yet). `togglePlugin` does tear down and re-create the backend runtime, so an `init`-owned child process gets a real shutdown signal. |
+| 8 | Does `*` match every domain? | **Yes.** `allowlist: ["*"]` alone routed `example.com` and `ws.postman-echo.com`. |
+
+#### Runtime facts that contradict the SDK types
+
+Three findings that change the implementation, each verified in the live runtime:
+
+1. **`TextDecoder` / `TextEncoder` do not exist.** `TextDecoder is not defined` at
+   runtime; neither appears anywhere in `@caido/quickjs-types@0.26.0`. Use
+   `Buffer.from(bytes).toString("latin1")` to decode, and pass a plain string to
+   `Connection.send`, which is legal because
+   `Bytes = string | Array<number> | Uint8Array` (`caido/shared.d.ts:16`).
+2. **`ConnectionInfo` exposes `isTLS` and `SNI`, not `tls` and `sni`.** The `.d.ts`
+   declares `get tls(): boolean` and `get sni(): string | undefined`, but the live
+   object's prototype is `["toString", "isTLS", "host", "port", "SNI"]`, and
+   `info.tls` / `info.sni` are `undefined`. Reading `info.tls` would have sent every
+   HTTPS request as plaintext, and TypeScript would not have caught it.
+3. **`Buffer.indexOf("\r\n\r\n")` does not match** in this runtime. Accumulate
+   `latin1` strings and use `String.indexOf` for byte-exact scanning.
+
+Also corrected: the root GraphQL field is **`pluginPackages`**, not `plugins`
+("Unknown field \"plugins\" on type \"QueryRoot\""). `updateUpstreamPlugin(id:, input:)`
+and `toggleUpstreamPlugin(id:, enabled:)` match the design. `togglePlugin(id:, enabled:)`
+exists and reloads a backend plugin's code; switching projects does **not**.
