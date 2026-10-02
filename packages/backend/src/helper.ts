@@ -31,14 +31,24 @@ export type ChildHandle = {
   stdout: { on(event: "data", cb: (chunk: unknown) => void): unknown };
   stderr: { on(event: "data", cb: (chunk: unknown) => void): unknown };
   on(event: "exit", cb: (code: number | null) => void): unknown;
-  write(line: string): void;
   kill(): void;
   closeStdin(): void;
 };
 
 export type HelperOptions = {
   exe: string;
-  spawn: (exe: string) => ChildHandle;
+  /**
+   * Path of the JSON file commands are written to.
+   *
+   * Caido's child_process does not deliver writes to a child's stdin — the
+   * helper's `ready` message arrives over stdout and stdin EOF still shuts it
+   * down, but a written command never reaches it. The helper polls this file
+   * instead.
+   */
+  commandFile: string;
+  /** Writes the command file. Injected so this module stays testable. */
+  writeCommand: (path: string, body: string) => Promise<void>;
+  spawn: (exe: string, commandFile: string) => ChildHandle;
   onState: (state: HelperState) => void;
   onCaptured: (hello: CapturedHello) => void;
   onCaptureState: (state: CaptureState) => void;
@@ -103,7 +113,7 @@ export class HelperManager {
   }
 
   sendCapture(enabled: boolean, listen: string, forwardTo: string): void {
-    this.send({ type: "capture", enabled, listen, forwardTo });
+    void this.send({ type: "capture", enabled, listen, forwardTo });
   }
 
   /** Closing stdin is the helper's documented shutdown signal; kill is the
@@ -124,12 +134,11 @@ export class HelperManager {
     this.point = null;
   }
 
-  private send(msg: unknown): void {
-    if (this.child === null) return;
+  private async send(msg: unknown): Promise<void> {
     try {
-      this.child.write(JSON.stringify(msg) + "\n");
+      await this.opts.writeCommand(this.opts.commandFile, JSON.stringify(msg));
     } catch (err) {
-      this.opts.log("warn", `helper: write failed: ${String(err)}`);
+      this.opts.log("warn", `helper: could not write a command: ${String(err)}`);
     }
   }
 
@@ -140,7 +149,7 @@ export class HelperManager {
 
     let child: ChildHandle;
     try {
-      child = this.opts.spawn(this.opts.exe);
+      child = this.opts.spawn(this.opts.exe, this.opts.commandFile);
     } catch (err) {
       this.setState({ kind: "failed", error: `spawn failed: ${String(err)}` });
       return Promise.resolve();

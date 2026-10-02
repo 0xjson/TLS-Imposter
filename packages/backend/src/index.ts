@@ -4,6 +4,7 @@
  */
 import type { DefineAPI, DefineEvents, SDK } from "caido:plugin";
 import { spawn } from "child_process";
+import { writeFile } from "fs/promises";
 import { join } from "path";
 
 import { openOneShot502 } from "./fallback";
@@ -38,15 +39,14 @@ export type BackendEvents = DefineEvents<{
 }>;
 
 /** Adapts Caido's child_process to the ChildHandle the manager expects. */
-function spawnHelper(exe: string): ChildHandle {
-  const child = spawn(exe, { stdio: ["pipe", "pipe", "pipe"] });
+function spawnHelper(exe: string, commandFile: string): ChildHandle {
+  const child = spawn(exe, ["-commands", commandFile], {
+    stdio: ["pipe", "pipe", "pipe"],
+  });
   return {
     stdout: child.stdout!,
     stderr: child.stderr!,
     on: (event, cb) => child.on(event, cb as never),
-    write: (line) => {
-      child.stdin!.write(line);
-    },
     kill: () => {
       child.kill();
     },
@@ -106,6 +106,10 @@ export function init(sdk: SDK<API, BackendEvents>) {
     // the binary lands directly in the assets directory rather than under bin/
     // (verified in dist/plugin_package/awesome-tls-backend/assets/).
     exe: join(sdk.meta.assetsPath(), HELPER_EXE),
+    // Commands travel through a file, not stdin: Caido's child_process does
+    // not deliver writes to a child's stdin (verified against Caido 0.58.3).
+    commandFile: join(sdk.meta.path(), "command.json"),
+    writeCommand: (path, body) => writeFile(path, body, "utf8"),
     spawn: spawnHelper,
     onState: (state) => {
       if (state.kind === "running") {
