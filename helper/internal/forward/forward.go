@@ -49,7 +49,11 @@ func Send(client tls_client.HttpClient, cfg *preamble.Config, req *httpwire.Requ
 	if len(req.Body) > 0 {
 		body = bytes.NewReader(req.Body)
 	}
-	out, err := fhttp.NewRequest(req.Method, u.String(), body)
+	// NewRequest gets a well-formed URL; u (whose Opaque holds the verbatim
+	// request-target) is applied afterwards. url.URL.String() drops Host when
+	// Opaque is set, so passing u.String() here would yield "https:/" and make
+	// every error message unreadable.
+	out, err := fhttp.NewRequest(req.Method, scheme+"://"+cfg.Addr()+"/", body)
 	if err != nil {
 		return nil, fmt.Errorf("forward: build request: %w", err)
 	}
