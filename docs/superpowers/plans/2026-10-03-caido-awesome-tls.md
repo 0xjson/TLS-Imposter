@@ -6325,17 +6325,159 @@ export function registerUpstream(sdk: SDK, deps: UpstreamDeps): void {
 rejected, replace the connect call with a `ConnectionInfo` whose `tls` is `false`, and update
 the two `expect(dialed)` assertions in `upstream.test.ts` accordingly.
 
-- [ ] **Step 8: Run the tests to verify they pass**
+- [ ] **Step 8: Write the failing fallback-responder test**
+
+`packages/backend/src/fallback.test.ts`:
+```ts
+import { describe, expect, it } from "vitest";
+import { connect } from "node:net";
+
+import { startFallbackResponder } from "./fallback";
+
+/** Reads everything the responder writes, then resolves. */
+function fetchRaw(port: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const sock = connect(port, "127.0.0.1", () => {
+      sock.write("GET /anything HTTP/1.1\r\nHost: target.example\r\n\r\n");
+    });
+    let out = "";
+    sock.setTimeout(3000, () => { sock.destroy(); reject(new Error("timeout")); });
+    sock.on("data", (d) => { out += d.toString("latin1"); });
+    sock.on("close", () => resolve(out));
+    sock.on("error", reject);
+  });
+}
+
+describe("startFallbackResponder", () => {
+  it("answers any connection with a 502 and closes", async () => {
+    const r = await startFallbackResponder(() => {});
+    try {
+      const raw = await fetchRaw(r.port);
+      expect(raw.startsWith("HTTP/1.1 502 Bad Gateway\r\n")).toBe(true);
+      expect(raw).toContain("X-Awesome-Tls-Error: helper unavailable");
+      expect(raw).toContain("Connection: close");
+      expect(raw).toMatch(/Content-Length: \d+/);
+      // Body must follow a blank line and be non-empty, so the operator sees why.
+      expect(raw.split("\r\n\r\n")[1]).toContain("Awesome TLS");
+    } finally {
+      r.close();
+    }
+  });
+
+  it("binds loopback only and reports a usable port", async () => {
+    const r = await startFallbackResponder(() => {});
+    try {
+      expect(r.port).toBeGreaterThan(0);
+      expect(r.port).toBeLessThan(65536);
+    } finally {
+      r.close();
+    }
+  });
+
+  it("serves repeated connections", async () => {
+    const r = await startFallbackResponder(() => {});
+    try {
+      for (let i = 0; i < 3; i++) {
+        expect(await fetchRaw(r.port)).toContain("502");
+      }
+    } finally {
+      r.close();
+    }
+  });
+
+  it("close() is idempotent", async () => {
+    const r = await startFallbackResponder(() => {});
+    r.close();
+    expect(() => r.close()).not.toThrow();
+  });
+});
+```
+
+- [ ] **Step 9: Run it to verify it fails**
+
+Run: `pnpm -C packages/backend test fallback`
+Expected: failure — cannot resolve `./fallback`.
+
+- [ ] **Step 10: Write `fallback.ts`**
+
+```ts
+/**
+ * The deny mechanism.
+ *
+ * Caido fails open: an exception in `onUpstream` is logged and the request is
+ * then sent by Caido itself, with Caido's own TLS fingerprint (Task 1, spec
+ * 11.1.1 Q4). The only way to deny a request is to hand Caido a connection that
+ * answers for us, so this is a loopback listener that replies 502 to anything.
+ */
+import { createServer, type Server, type Socket } from "net";
+
+const BODY =
+  "Awesome TLS: the fingerprint helper is unavailable, so this request was " +
+  "blocked rather than sent with Caido's own TLS fingerprint.\n";
+
+const RESPONSE =
+  "HTTP/1.1 502 Bad Gateway\r\n" +
+  "Content-Type: text/plain; charset=utf-8\r\n" +
+  "X-Awesome-Tls-Error: helper unavailable\r\n" +
+  `Content-Length: ${BODY.length}\r\n` +
+  "Connection: close\r\n" +
+  "\r\n" +
+  BODY;
+
+export type FallbackResponder = {
+  port: number;
+  close(): void;
+};
+
+export function startFallbackResponder(
+  log: (level: "info" | "warn" | "error", msg: string) => void,
+): Promise<FallbackResponder> {
+  return new Promise((resolve, reject) => {
+    const server: Server = createServer((sock: Socket) => {
+      // Answer without reading: the request content is irrelevant, and not
+      // waiting for it avoids stalling on a client that writes nothing.
+      sock.on("error", () => {});
+      sock.end(RESPONSE);
+    });
+
+    server.on("error", (err: Error) => {
+      log("error", `Awesome TLS: fallback responder error: ${err.message}`);
+      reject(err);
+    });
+
+    server.listen(0, "127.0.0.1", () => {
+      const addr = server.address();
+      const port = typeof addr === "object" && addr !== null ? addr.port : 0;
+      if (port === 0) {
+        reject(new Error("fallback responder got no port"));
+        return;
+      }
+      let closed = false;
+      resolve({
+        port,
+        close: () => {
+          if (closed) return;
+          closed = true;
+          server.close();
+        },
+      });
+    });
+  });
+}
+```
+
+- [ ] **Step 11: Run the tests to verify they pass**
 
 Run: `pnpm -C packages/backend test`
 Expected: every backend test PASSes.
 
-- [ ] **Step 9: Commit**
+- [ ] **Step 12: Commit**
 
 ```bash
 git add packages/backend/src/preamble.ts packages/backend/src/preamble.test.ts \
-        packages/backend/src/upstream.ts packages/backend/src/upstream.test.ts
-git commit -m "feat(backend): preamble builder and fail-closed onUpstream hook"
+        packages/backend/src/upstream.ts packages/backend/src/upstream.test.ts \
+        packages/backend/src/fallback.ts packages/backend/src/fallback.test.ts
+git commit -m "feat(backend): preamble builder, 502 fallback responder and onUpstream hook"
 ```
 
 ---
@@ -6658,6 +6800,7 @@ import {
 } from "./helper";
 import { enableForAllDomains, findBackendPluginId, readRule, type UpstreamRule } from "./routing";
 import { SettingsStore, type DeepPartial, type Settings } from "./settings";
+import { startFallbackResponder } from "./fallback";
 import { registerUpstream } from "./upstream";
 
 const HELPER_EXE = "awesome-tls-helper.exe";
@@ -6761,7 +6904,19 @@ export function init(sdk: SDK<API, BackendEvents>) {
     log,
   });
 
-  registerUpstream(sdk, { helper, settings: store, log });
+  // The deny mechanism must exist before the hook is registered, or an early
+  // request with the helper still starting has nothing to be denied by.
+  let fallback: { port: number; close(): void } | null = null;
+  void startFallbackResponder(log)
+    .then((r) => { fallback = r; log("info", `Awesome TLS: 502 responder on 127.0.0.1:${r.port}`); })
+    .catch((err) => { log("error", `Awesome TLS: no 502 responder: ${String(err)}`); });
+
+  registerUpstream(sdk, {
+    helper,
+    settings: store,
+    fallbackPort: () => fallback?.port ?? null,
+    log,
+  });
 
   sdk.api.register("getState", () => snapshot());
 
