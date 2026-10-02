@@ -24,6 +24,12 @@
 - Fail closed: when the helper is unavailable the `onUpstream` callback throws so the request fails. Never fall back to Caido's own stack, which would silently send the operator's real fingerprint.
 - Header order reaches `tls-client` through `fhttp.HeaderOrderKey` **lowercased** — the library matches case-sensitively and ignores mixed-case entries.
 - Plugin package id `awesome-tls`; backend component id `awesome-tls-backend`; frontend component id `awesome-tls-frontend`.
+- **Backend runtime facts verified against Caido 0.58.3 in Task 1 (spec 11.1.1). The SDK types are wrong about two of these, so the compiler will not protect you:**
+  - `TextEncoder` / `TextDecoder` **do not exist**. Decode with `Buffer.from(bytes).toString("latin1")`; to send, pass a plain string, since `Bytes = string | Array<number> | Uint8Array`.
+  - `ConnectionInfo` exposes **`isTLS`** and **`SNI`**, not `tls` and `sni`. Reading `info.tls` yields `undefined`, which would send every HTTPS request as plaintext.
+  - `Buffer.indexOf("\r\n\r\n")` **does not match**. Accumulate `latin1` strings and use `String.indexOf`.
+  - The root GraphQL field is **`pluginPackages`**, not `plugins`.
+  - Caido opens a **fresh connection per request** and never reuses a plugin-supplied one, so the keep-alive loop in Task 9 is defensive only.
 
 ## Review Focus
 
@@ -102,6 +108,12 @@ Boundaries worth stating, because they are what keep the files small: `httpwire`
 ## Phase 0 — Probe Caido's actual behavior
 
 ### Task 1: Scaffold the repo and answer the probe questions
+
+> **COMPLETE (2026-10-03).** Results in spec section 11.1.1. The probe code below
+> is historical and contains two calls (`TextDecoder`, `TextEncoder`) that this
+> task proved do not exist in the backend runtime — see Global Constraints.
+> **Probe question 4 came back FAIL-OPEN, which trips the Step 7 gate:** spec
+> section 10's fail-closed design cannot be achieved by throwing.
 
 Spec section 11.1. The probe plugin is **throwaway**: its findings are written into the spec and its code is deleted at the end of this task. Nothing else in the plan may start until probe question 4 is answered, because a `false` answer changes the design.
 
@@ -5897,8 +5909,7 @@ const args = {
   timeoutSec: 30,
 };
 
-function decode(bytes: Uint8Array): { magic: string; json: Record<string, unknown> } {
-  const text = new TextDecoder().decode(bytes);
+function decode(text: string): { magic: string; json: Record<string, unknown> } {
   expect(text.endsWith("\n")).toBe(true);
   const space = text.indexOf(" ");
   return {
@@ -5922,7 +5933,7 @@ describe("buildPreamble", () => {
   });
 
   it("contains exactly one newline, at the very end", () => {
-    const text = new TextDecoder().decode(buildPreamble(args));
+    const text = buildPreamble(args);
     expect(text.split("\n")).toHaveLength(2);
     expect(text.indexOf("\n")).toBe(text.length - 1);
   });
@@ -5935,9 +5946,8 @@ describe("buildPreamble", () => {
     expect(json.clientHello).toBe("160301aa");
   });
 
-  it("encodes a non-ASCII host as UTF-8 without a stray newline", () => {
-    const bytes = buildPreamble({ ...args, host: "xn--caf-dma.example" });
-    const { json } = decode(bytes);
+  it("keeps a punycode host intact without a stray newline", () => {
+    const { json } = decode(buildPreamble({ ...args, host: "xn--caf-dma.example" }));
     expect(json.target).toMatchObject({ host: "xn--caf-dma.example" });
   });
 
@@ -6014,7 +6024,7 @@ export type PreambleArgs = {
   timeoutSec: number;
 };
 
-export function buildPreamble(args: PreambleArgs): Uint8Array {
+export function buildPreamble(args: PreambleArgs): string {
   const payload = {
     token: args.token,
     target: { host: args.host, port: args.port, tls: args.tls },
@@ -6034,14 +6044,18 @@ export function buildPreamble(args: PreambleArgs): Uint8Array {
     throw new Error("preamble: token contains a line break");
   }
 
-  return new TextEncoder().encode(MAGIC + json + "\n");
+  // Returns a string, not bytes: TextEncoder does not exist in Caido's QuickJS
+  // backend runtime, and `Bytes = string | Array<number> | Uint8Array`, so
+  // Connection.send accepts this directly. The preamble is pure ASCII because
+  // JSON.stringify escapes everything above U+007F.
+  return MAGIC + json + "\n";
 }
 
 /** Chooses the fingerprint for this request from the current settings. */
 export function preambleArgsFor(
   settings: Settings,
   token: string,
-  info: { host: string; port: number; tls: boolean; sni?: string | undefined },
+  info: { host: string; port: number; tls: boolean; sni: string | null },
 ): PreambleArgs {
   const captured =
     settings.source === "captured" ? settings.capture.last?.clientHello ?? null : null;
@@ -6051,7 +6065,7 @@ export function preambleArgsFor(
     host: info.host,
     port: info.port,
     tls: info.tls,
-    sni: info.sni ?? null,
+    sni: info.sni,
     // The profile travels even with a captured hello: it supplies the HTTP/2
     // layer, which a ClientHello says nothing about.
     profile: settings.profile,
@@ -6084,8 +6098,16 @@ function fakeSdk(conn: FakeConn) {
   };
 }
 
+// Mirrors the RUNTIME shape (isTLS/SNI), not the SDK's declared tls/sni.
 function fakeRequest(info: { host: string; port: number; tls: boolean; sni?: string }) {
-  return { getInfo: () => ({ ...info, sni: info.sni }) };
+  return {
+    getInfo: () => ({
+      host: info.host,
+      port: info.port,
+      isTLS: info.tls,
+      SNI: info.sni,
+    }),
+  };
 }
 
 function deps(overrides: {
@@ -6120,7 +6142,7 @@ describe("upstream handler", () => {
     expect(dialed).toContain("51234");
 
     expect(conn.send).toHaveBeenCalledTimes(1);
-    const sent = new TextDecoder().decode(conn.send.mock.calls[0]![0] as Uint8Array);
+    const sent = conn.send.mock.calls[0]![0] as string;
     expect(sent.startsWith("AWESOMETLS/1 ")).toBe(true);
     expect(sent).toContain('"host":"example.com"');
     expect(sent.endsWith("\n")).toBe(true);
@@ -6134,7 +6156,7 @@ describe("upstream handler", () => {
     await handler(fakeSdk(conn) as never,
       fakeRequest({ host: "h", port: 8080, tls: false }) as never);
 
-    const sent = new TextDecoder().decode(conn.send.mock.calls[0]![0] as Uint8Array);
+    const sent = conn.send.mock.calls[0]![0] as string;
     expect(sent).toContain('"port":8080');
     expect(sent).toContain('"tls":false');
   });
@@ -6229,12 +6251,19 @@ export function makeUpstreamHandler(deps: UpstreamDeps) {
       );
     }
 
-    const info = request.getInfo();
+    // ConnectionInfo exposes isTLS/SNI at runtime, while the SDK types declare
+    // tls/sni. Reading the typed names returns undefined (Task 1, spec 11.1.1).
+    const info = request.getInfo() as unknown as {
+      host: string;
+      port: number;
+      isTLS: boolean;
+      SNI?: string;
+    };
     const args = preambleArgsFor(deps.settings.get(), endpoint.token, {
       host: info.host,
       port: info.port,
-      tls: info.tls,
-      sni: info.sni,
+      tls: info.isTLS === true,
+      sni: info.SNI ?? null,
     });
 
     const connection = await sdk.net.connect(`tcp://127.0.0.1:${endpoint.port}`);
@@ -6307,17 +6336,17 @@ function executor(responses: unknown[]) {
 describe("findBackendPluginId", () => {
   it("matches on manifestId and the backend typename", async () => {
     const { execute } = executor([
-      { data: { plugins: [
+      { data: { pluginPackages: [ { id: "pkg1", plugins: [
         { __typename: "PluginFrontend", id: "1", manifestId: "awesome-tls-frontend" },
         { __typename: "PluginBackend", id: "42", manifestId: "awesome-tls-backend" },
-      ] } },
+      ] } ] } },
     ]);
 
     expect(await findBackendPluginId(execute, "awesome-tls-backend")).toBe("42");
   });
 
   it("returns null when no plugin matches", async () => {
-    const { execute } = executor([{ data: { plugins: [] } }]);
+    const { execute } = executor([{ data: { pluginPackages: [] } }]);
     expect(await findBackendPluginId(execute, "awesome-tls-backend")).toBeNull();
   });
 
@@ -6350,7 +6379,9 @@ describe("readRule", () => {
 describe("enableForAllDomains", () => {
   it("creates a wildcard rule when none exists", async () => {
     const { execute, calls } = executor([
-      { data: { plugins: [{ __typename: "PluginBackend", id: "42", manifestId: "awesome-tls-backend" }] } },
+      { data: { pluginPackages: [ { id: "pkg1", plugins: [
+        { __typename: "PluginBackend", id: "42", manifestId: "awesome-tls-backend" },
+      ] } ] } },
       { data: { upstreamPlugins: [] } },
       { data: { createUpstreamPlugin: { upstream: {
         id: "11", enabled: true, allowlist: ["*"], denylist: [], plugin: { id: "42" },
@@ -6369,7 +6400,9 @@ describe("enableForAllDomains", () => {
 
   it("updates an existing rule rather than creating a second one", async () => {
     const { execute, calls } = executor([
-      { data: { plugins: [{ __typename: "PluginBackend", id: "42", manifestId: "awesome-tls-backend" }] } },
+      { data: { pluginPackages: [ { id: "pkg1", plugins: [
+        { __typename: "PluginBackend", id: "42", manifestId: "awesome-tls-backend" },
+      ] } ] } },
       { data: { upstreamPlugins: [
         { id: "10", enabled: false, allowlist: ["old.example"], denylist: [], plugin: { id: "42" } },
       ] } },
@@ -6384,14 +6417,16 @@ describe("enableForAllDomains", () => {
   });
 
   it("throws a clear error when the plugin id cannot be resolved", async () => {
-    const { execute } = executor([{ data: { plugins: [] } }]);
+    const { execute } = executor([{ data: { pluginPackages: [] } }]);
     await expect(enableForAllDomains(execute, "awesome-tls-backend"))
       .rejects.toThrow(/plugin id/i);
   });
 
   it("throws when the mutation reports errors", async () => {
     const { execute } = executor([
-      { data: { plugins: [{ __typename: "PluginBackend", id: "42", manifestId: "awesome-tls-backend" }] } },
+      { data: { pluginPackages: [ { id: "pkg1", plugins: [
+        { __typename: "PluginBackend", id: "42", manifestId: "awesome-tls-backend" },
+      ] } ] } },
       { data: { upstreamPlugins: [] } },
       { errors: [{ message: "forbidden" }] },
     ]);
@@ -6429,9 +6464,14 @@ export type GraphQLExecute = <T>(
   variables?: Record<string, unknown>,
 ) => Promise<{ data?: T; errors?: { message: string }[] }>;
 
+// The root field is `pluginPackages`; `plugins` does not exist on QueryRoot
+// ("Unknown field \"plugins\" on type \"QueryRoot\"" against Caido 0.58.3).
 const PLUGINS_QUERY = `
   query awesomeTlsPlugins {
-    plugins { __typename id manifestId }
+    pluginPackages {
+      id
+      plugins { __typename id manifestId }
+    }
   }
 `;
 
@@ -6458,6 +6498,7 @@ const UPDATE_MUTATION = `
 `;
 
 type PluginRow = { __typename?: string; id: string; manifestId: string };
+type PackageRow = { id: string; plugins: PluginRow[] };
 type RuleRow = UpstreamRule & { plugin: { id: string } };
 
 function firstError(res: { errors?: { message: string }[] }): string | null {
@@ -6469,13 +6510,16 @@ export async function findBackendPluginId(
   execute: GraphQLExecute,
   manifestId: string,
 ): Promise<string | null> {
-  const res = await execute<{ plugins: PluginRow[] }>(PLUGINS_QUERY);
+  const res = await execute<{ pluginPackages: PackageRow[] }>(PLUGINS_QUERY);
   if (firstError(res) !== null) return null;
 
-  const match = (res.data?.plugins ?? []).find(
-    (p) => p.manifestId === manifestId && p.__typename !== "PluginFrontend",
-  );
-  return match?.id ?? null;
+  for (const pkg of res.data?.pluginPackages ?? []) {
+    const match = (pkg.plugins ?? []).find(
+      (p) => p.manifestId === manifestId && p.__typename !== "PluginFrontend",
+    );
+    if (match !== undefined) return match.id;
+  }
+  return null;
 }
 
 export async function readRule(
