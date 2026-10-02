@@ -35,15 +35,11 @@ class Emitter {
 
 /** A scriptable stand-in for the helper process. */
 class FakeChild extends Emitter implements ChildHandle {
-  readonly written: string[] = [];
   killed = false;
   stdinClosed = false;
   readonly stdout = new Emitter();
   readonly stderr = new Emitter();
 
-  write(line: string): void {
-    this.written.push(line);
-  }
   kill(): void {
     this.killed = true;
     this.emit("exit", 0);
@@ -80,8 +76,13 @@ function setup() {
   const captureStates: unknown[] = [];
   const logs: unknown[] = [];
 
+  const written: { path: string; body: string }[] = [];
   const manager = new HelperManager({
     exe: "C:/fake/awesome-tls-helper.exe",
+    commandFile: "C:/fake/data/command.json",
+    writeCommand: async (path, body) => {
+      written.push({ path, body });
+    },
     spawn: spawner,
     onState: (s) => states.push(s),
     onCaptured: (c) => captured.push(c),
@@ -89,7 +90,7 @@ function setup() {
     log: (level, msg) => logs.push({ level, msg }),
   });
 
-  return { manager, children, spawner, states, captured, captureStates, logs };
+  return { manager, children, spawner, states, captured, captureStates, logs, written };
 }
 
 beforeEach(() => {
@@ -213,16 +214,18 @@ describe("HelperManager", () => {
   });
 
   it("forwards capture commands and surfaces capture state", async () => {
-    const { manager, children, captureStates } = setup();
+    const { manager, children, captureStates, written } = setup();
     const started = manager.start();
     children[0]!.readyNow();
     await started;
 
     manager.sendCapture(true, "127.0.0.1:8886", "127.0.0.1:8080");
-    const sent = children[0]!.written.join("");
-    expect(sent).toContain('"type":"capture"');
-    expect(sent).toContain('"listen":"127.0.0.1:8886"');
-    expect(sent.endsWith("\n")).toBe(true);
+    await vi.advanceTimersByTimeAsync(10);
+    // Commands go to a file, because Caido does not deliver stdin writes.
+    expect(written).toHaveLength(1);
+    expect(written[0]!.path).toBe("C:/fake/data/command.json");
+    expect(written[0]!.body).toContain('"type":"capture"');
+    expect(written[0]!.body).toContain('"listen":"127.0.0.1:8886"');
 
     children[0]!.say({ type: "capture-status", state: "listening", listen: "127.0.0.1:8886" });
     await vi.advanceTimersByTimeAsync(10);
@@ -233,7 +236,7 @@ describe("HelperManager", () => {
   });
 
   it("reports a rejected capture as an error state", async () => {
-    const { manager, children, captureStates } = setup();
+    const { manager, children, captureStates, written } = setup();
     const started = manager.start();
     children[0]!.readyNow();
     await started;
@@ -313,6 +316,8 @@ describe("HelperManager", () => {
     const states: unknown[] = [];
     const manager = new HelperManager({
       exe: "C:/missing.exe",
+      commandFile: "C:/fake/data/command.json",
+      writeCommand: async () => {},
       spawn: () => {
         throw new Error("ENOENT");
       },
@@ -328,9 +333,13 @@ describe("HelperManager", () => {
 
   // sendCapture before the child exists must not throw: the UI may toggle it
   // while the helper is restarting.
-  it("drops capture commands when there is no child", () => {
-    const { manager } = setup();
+  // The file is written whether or not a child exists: the helper reads it on
+  // startup, so a command issued while restarting is not lost.
+  it("writes a capture command even with no child running", async () => {
+    const { manager, written } = setup();
     expect(() => manager.sendCapture(true, "127.0.0.1:8886", "127.0.0.1:8080")).not.toThrow();
+    await vi.advanceTimersByTimeAsync(10);
+    expect(written).toHaveLength(1);
   });
 
   it("reports helper log lines through the log callback", async () => {

@@ -9,6 +9,7 @@ package main
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"flag"
 	"fmt"
 	"net"
 	"os"
@@ -32,7 +33,18 @@ const captureThrottle = 2 * time.Second
 // be reused, as a browser's would be.
 const clientIdleTTL = 10 * time.Minute
 
+// commandPoll is how often the command file is checked. Capture is toggled by
+// hand, so this is a human-scale interval.
+const commandPoll = 500 * time.Millisecond
+
 func main() {
+	// Caido's child_process does not deliver writes to a child's stdin, so
+	// commands arrive through a file the plugin rewrites instead. stdin is
+	// still read, because its EOF remains a working shutdown signal.
+	commandFile := flag.String("commands", "",
+		"path to a JSON file the plugin rewrites to send commands")
+	flag.Parse()
+
 	out := control.NewWriter(os.Stdout)
 
 	token, err := newToken()
@@ -70,6 +82,11 @@ func main() {
 	}
 
 	go accept(ln, token, cache, out)
+
+	if *commandFile != "" {
+		stopWatch := control.WatchCommandFile(*commandFile, commandPoll, cm.handle)
+		defer stopWatch()
+	}
 
 	// Returning from ReadCommands means stdin closed: the plugin is gone.
 	if err := control.ReadCommands(os.Stdin, cm.handle); err != nil {
@@ -116,6 +133,11 @@ type captureManager struct {
 }
 
 func (m *captureManager) handle(c control.Command) {
+	// Logged unconditionally: it is the only way to tell from the outside
+	// whether commands written to our stdin are arriving at all.
+	m.out.Logf("info", "command received: type=%q enabled=%v listen=%q forwardTo=%q",
+		c.Type, c.Enabled, c.Listen, c.ForwardTo)
+
 	if c.Type != "capture" {
 		return
 	}
