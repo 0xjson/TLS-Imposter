@@ -487,3 +487,36 @@ Also corrected: the root GraphQL field is **`pluginPackages`**, not `plugins`
 ("Unknown field \"plugins\" on type \"QueryRoot\""). `updateUpstreamPlugin(id:, input:)`
 and `toggleUpstreamPlugin(id:, enabled:)` match the design. `togglePlugin(id:, enabled:)`
 exists and reloads a backend plugin's code; switching projects does **not**.
+
+### 11.3.1 Helper-level fingerprint confirmation (2026-10-03, Task 12)
+
+Before the plugin existed, the shipped Windows cross-compile was driven directly
+over its control protocol from WSL and pointed at `https://tls.peet.ws/api/all`.
+This confirms the core mechanism independently of Caido.
+
+| | `chrome_150` | `firefox_148` |
+|---|---|---|
+| `http_version` | **h2** | **h2** |
+| `tls.ja3_hash` | `f984bd5bc7358922cde86ed4471a2e89` | `992b82b242c18c86da84eff5bf3e3100` |
+| `tls.ja4` | `t13d1516h2_8daaf6152771_806a8c22fdea` | `t13d1917h2_4d8ed5baf28e_3cbfd9057e0d` |
+| `tls.peetprint_hash` | `67c3e9111bed9e7f03d2f21d6d88994b` | `ec345e44ccb04da8547a9f2542be9f0d` |
+| `http2.akamai_fingerprint_hash` | `52d84b11737d980aef856699f885ca86` | `6ea73faa8fc5aac76bded7bd238f6433` |
+
+Three things this establishes:
+
+1. **HTTP/2 is negotiated and fingerprinted.** `http_version: h2` plus a distinct
+   `akamai_fingerprint_hash` per profile means the HTTP/2 layer is being set, not
+   just the TLS layer. That half is what a TLS-only byte pipe could not have given.
+2. **Profile selection takes effect.** Every reported value differs between the two
+   profiles.
+3. **This repo's JA3 and JA4 implementations are externally correct.** The values
+   computed locally from `testdata/chrome.hello` match what tls.peet.ws reported
+   byte for byte, so `TestAnalyzeAcceptsTheRecordedChromeHello` now asserts them as
+   a frozen vector. Task 19 Step 5 is satisfied early; it remains only to confirm
+   the same values once the traffic flows through Caido rather than straight from
+   the helper.
+
+Also settled here: probe question 7. The `-H windowsgui` binary
+(`PE32+ ... (GUI), x86-64`, 11.4 MB) receives its `ready` line over a pipe in
+0.23 s and exits with code 0 when stdin closes, so the GUI subsystem does not
+break stdio and the helper cannot outlive the plugin.
