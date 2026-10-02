@@ -346,11 +346,23 @@ kills the process if it has not exited within 2 s.
 **No console window.** The helper is linked with `-H windowsgui` so launching it does not flash a
 console window on Windows. Its stdio pipes still work because the plugin creates them.
 
+**The fallback responder.** `init` starts a `net` listener on `127.0.0.1:0` that writes a fixed
+`502` response to any connection and closes it. It exists for the whole plugin lifetime, costs one
+socket, and is the only way to deny a request on a platform that fails open. Task 1 verified that
+Caido relays a response from a plugin-owned listener verbatim, so the operator sees the 502 in
+Caido's history rather than a silent success.
+
+**The fallback responder.** `init` starts a `net` listener on `127.0.0.1:0` that writes a fixed
+`502` response to any connection and closes it. It lives for the whole plugin lifetime, costs one
+socket, and is the only way to deny a request on a platform that fails open. Task 1 verified that
+Caido relays a response from a plugin-owned listener verbatim, so the operator sees the 502 in
+Caido's history rather than a silent success with the wrong fingerprint.
+
 **Failure modes:**
 
 | Condition | Behavior |
 |---|---|
-| Helper not running | The hook throws, so the request fails. Fail closed: a silent fallback would send the operator's real fingerprint without their knowledge. The status card explains the cause. |
+| Helper not running | `onUpstream` returns a connection to the plugin's own fallback responder, which replies `502` with `X-Awesome-Tls-Error: helper unavailable`. The request never leaves the machine. Throwing would **not** work: Task 1 showed Caido then sends the request itself with its own fingerprint (spec 11.1.1, Q4). The status card explains the cause. |
 | DNS, connection refused, TLS handshake error | `502` with `X-Awesome-TLS-Error` and the reason in the body, visible in Caido's history. |
 | Timeout | `504`, same shape. |
 | Bad token or malformed preamble | Connection closed, event logged. |

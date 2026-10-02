@@ -21,7 +21,7 @@
 - `DisableCompression: true` is load-bearing, not an optimization. `fhttp` decompresses whenever the *caller's* `Accept-Encoding` mentions gzip (`transport.go:2571`) and unconditionally on HTTP/2 (`h2_bundle.go:9273`). Without it the helper returns a decompressed body still labelled `Content-Encoding: gzip`.
 - Responses are **buffered**, never streamed. Decided at design review.
 - Request bodies are capped at 256 MiB; the preamble line at 64 KiB.
-- Fail closed: when the helper is unavailable the `onUpstream` callback throws so the request fails. Never fall back to Caido's own stack, which would silently send the operator's real fingerprint.
+- Fail closed **via a 502 responder, never by throwing**. Task 1 proved Caido fails open: an exception in `onUpstream` is logged and Caido then sends the request itself with its own fingerprint (spec 11.1.1, Q4). The plugin owns a loopback listener that answers `502`, and `onUpstream` returns a connection to it when the helper is down.
 - Header order reaches `tls-client` through `fhttp.HeaderOrderKey` **lowercased** — the library matches case-sensitively and ignores mixed-case entries.
 - Plugin package id `awesome-tls`; backend component id `awesome-tls-backend`; frontend component id `awesome-tls-frontend`.
 - **Backend runtime facts verified against Caido 0.58.3 in Task 1 (spec 11.1.1). The SDK types are wrong about two of these, so the compiler will not protect you:**
@@ -5878,8 +5878,8 @@ git commit -m "feat(backend): helper process supervisor with restart backoff"
 ### Task 15: Preamble builder and the upstream hook
 
 **Files:**
-- Create: `packages/backend/src/preamble.ts`, `packages/backend/src/preamble.test.ts`, `packages/backend/src/upstream.ts`
-- Test: `packages/backend/src/upstream.test.ts`
+- Create: `packages/backend/src/preamble.ts`, `packages/backend/src/preamble.test.ts`, `packages/backend/src/upstream.ts`, `packages/backend/src/fallback.ts`
+- Test: `packages/backend/src/upstream.test.ts`, `packages/backend/src/fallback.test.ts`
 
 **Interfaces:**
 - Consumes: `Settings` (Task 13), `HelperManager` (Task 14).
@@ -5887,7 +5887,8 @@ git commit -m "feat(backend): helper process supervisor with restart backoff"
   - `buildPreamble(args: PreambleArgs): Uint8Array`
   - `type PreambleArgs = { token: string; host: string; port: number; tls: boolean; sni: string | null; profile: string; clientHello: string | null; timeoutSec: number }`
   - `preambleArgsFor(settings: Settings, token: string, info: { host: string; port: number; tls: boolean; sni?: string }): PreambleArgs`
-  - `registerUpstream(sdk, deps: { helper: HelperManager; settings: { get(): Settings } }): void`
+  - `registerUpstream(sdk, deps: { helper: HelperManager; settings: { get(): Settings }; fallbackPort: () => number | null }): void`
+  - `startFallbackResponder(log): Promise<{ port: number; close(): void }>` — the loopback 502 listener that makes fail-closed possible on a platform that fails open
 
 - [ ] **Step 1: Write the failing preamble test**
 
@@ -6113,11 +6114,14 @@ function fakeRequest(info: { host: string; port: number; tls: boolean; sni?: str
 function deps(overrides: {
   endpoint?: { port: number; token: string } | null;
   settings?: Settings;
+  fallbackPort?: number | null;
 } = {}) {
   const endpoint = overrides.endpoint === undefined
     ? { port: 51234, token: "tok" }
     : overrides.endpoint;
+  const fallbackPort = overrides.fallbackPort === undefined ? 59999 : overrides.fallbackPort;
   return {
+    fallbackPort: () => fallbackPort,
     helper: {
       endpoint: () => endpoint,
       state: () => ({ kind: "running" as const, port: 51234, profiles: [], defaultProfile: "", version: "" }),
@@ -6161,16 +6165,32 @@ describe("upstream handler", () => {
     expect(sent).toContain('"tls":false');
   });
 
-  it("throws when the helper is not running, so the request fails closed", async () => {
+  it("routes to the 502 responder when the helper is down, not to the target", async () => {
     const conn: FakeConn = { send: vi.fn(async () => {}), receive: vi.fn() };
     const sdk = fakeSdk(conn);
     const handler = makeUpstreamHandler(deps({ endpoint: null }));
 
+    const result = await handler(
+      sdk as never, fakeRequest({ host: "h", port: 443, tls: true }) as never);
+
+    // Caido fails open, so denial means handing back our own responder.
+    const dialed = String(sdk.net.connect.mock.calls[0]![0]);
+    expect(dialed).toContain("127.0.0.1");
+    expect(dialed).toContain("59999");
+    expect(result).toEqual({ connection: conn });
+    // No preamble: the responder is not the helper and speaks no protocol.
+    expect(conn.send).not.toHaveBeenCalled();
+  });
+
+  it("throws only when the responder is also unavailable", async () => {
+    const conn: FakeConn = { send: vi.fn(async () => {}), receive: vi.fn() };
+    const sdk = fakeSdk(conn);
+    const handler = makeUpstreamHandler(
+      deps({ endpoint: null, fallbackPort: null }));
+
     await expect(
       handler(sdk as never, fakeRequest({ host: "h", port: 443, tls: true }) as never),
-    ).rejects.toThrow(/helper/i);
-
-    expect(sdk.net.connect).not.toHaveBeenCalled();
+    ).rejects.toThrow(/fallback responder/i);
   });
 
   it("propagates a connect failure rather than returning undefined", async () => {
@@ -6234,8 +6254,20 @@ export type UpstreamDeps = {
     state: () => { kind: string };
   };
   settings: { get(): Settings };
+  /** Port of the 502 responder, or null if it could not be started. */
+  fallbackPort: () => number | null;
   log: (level: "info" | "warn" | "error", msg: string) => void;
 };
+
+/** Host:port of a request, for log lines only. */
+function info0(request: Pick<RequestSpecRaw, "getInfo">): string {
+  try {
+    const i = request.getInfo() as unknown as { host: string; port: number };
+    return `${i.host}:${i.port}`;
+  } catch {
+    return "<unknown target>";
+  }
+}
 
 export function makeUpstreamHandler(deps: UpstreamDeps) {
   return async function onUpstream(
@@ -6244,11 +6276,21 @@ export function makeUpstreamHandler(deps: UpstreamDeps) {
   ): Promise<{ connection: Connection }> {
     const endpoint = deps.helper.endpoint();
     if (endpoint === null) {
-      // Fail closed. Returning undefined would let Caido send the request with
-      // its own fingerprint, silently defeating the plugin.
-      throw new Error(
-        `Awesome TLS: helper is not running (${deps.helper.state().kind}); request blocked`,
-      );
+      // Fail closed. Task 1 proved that neither throwing nor returning
+      // undefined denies the request: Caido logs the error and then sends it
+      // itself with its own fingerprint. Handing back a connection to our own
+      // 502 responder is the only way to stop it leaving the machine.
+      const port = deps.fallbackPort();
+      if (port === null) {
+        // The responder failed to start; throwing is strictly worse than
+        // nothing here, but there is no denial mechanism left.
+        throw new Error(
+          `Awesome TLS: helper is down (${deps.helper.state().kind}) and the ` +
+            `fallback responder is unavailable; request may leave unspoofed`,
+        );
+      }
+      deps.log("warn", `Awesome TLS: helper down; answering 502 for ${info0(request)}`);
+      return { connection: await sdk.net.connect(`tcp://127.0.0.1:${port}`) };
     }
 
     // ConnectionInfo exposes isTLS/SNI at runtime, while the SDK types declare
