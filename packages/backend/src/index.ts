@@ -9,7 +9,7 @@ import { join } from "path";
 
 import { openOneShot502 } from "./fallback";
 import { HelperManager, type CaptureState, type ChildHandle, type HelperState } from "./helper";
-import { enableForAllDomains, findBackendPluginId, readRule, type UpstreamRule } from "./routing";
+import { enableForAllDomains, readRule, type UpstreamRule } from "./routing";
 import { SettingsStore, type DeepPartial, type Settings } from "./settings";
 import { registerUpstream } from "./upstream";
 
@@ -225,11 +225,8 @@ export function init(sdk: SDK<API, BackendEvents>) {
 
     // Routing discovery is cosmetic: it only populates the status card.
     try {
-      const pluginId = await findBackendPluginId(graphql, sdk.meta.id());
-      if (pluginId !== null) {
-        routing = await readRule(graphql, pluginId);
-        publish();
-      }
+      routing = await readRule(graphql, sdk.meta.id());
+      publish();
     } catch (err) {
       log("warn", `Awesome TLS: could not read the routing rule: ${String(err)}`);
     }
