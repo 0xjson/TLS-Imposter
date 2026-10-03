@@ -1,6 +1,14 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { enableForAllDomains, findBackendPluginId, readRule } from "./routing";
+import { enableForAllDomains, readRule } from "./routing";
+
+/**
+ * The id Caido hands the backend through `sdk.meta.id()`: its Caido-internal
+ * plugin id, not the manifest id "awesome-tls-backend". Taken verbatim from a
+ * live install, where it is also the `plugin_id` of the upstream rule row
+ * (Caido 0.58.3).
+ */
+const META_ID = "3aec3301-7889-446d-be57-c9c5de37f113";
 
 /** A GraphQL executor that answers from a script of responses. */
 function executor(responses: unknown[]) {
@@ -12,76 +20,42 @@ function executor(responses: unknown[]) {
   return { execute, calls };
 }
 
-// The real schema nests plugins inside pluginPackages; `plugins` does not exist
-// on QueryRoot (verified against Caido 0.58.3).
-function packagesResponse() {
+function ruleRow(overrides: Record<string, unknown> = {}) {
   return {
-    data: {
-      pluginPackages: [
-        {
-          id: "pkg0",
-          plugins: [{ __typename: "PluginBackend", id: "99", manifestId: "other-plugin" }],
-        },
-        {
-          id: "pkg1",
-          plugins: [
-            { __typename: "PluginFrontend", id: "1", manifestId: "awesome-tls-frontend" },
-            { __typename: "PluginBackend", id: "42", manifestId: "awesome-tls-backend" },
-          ],
-        },
-      ],
-    },
+    id: "1",
+    enabled: true,
+    allowlist: ["*"],
+    denylist: [],
+    plugin: { id: META_ID },
+    ...overrides,
   };
 }
 
-describe("findBackendPluginId", () => {
-  it("matches on manifestId and the backend typename across packages", async () => {
-    const { execute } = executor([packagesResponse()]);
-    expect(await findBackendPluginId(execute, "awesome-tls-backend")).toBe("42");
-  });
-
-  it("queries pluginPackages, not plugins", async () => {
-    const { execute, calls } = executor([packagesResponse()]);
-    await findBackendPluginId(execute, "awesome-tls-backend");
-    expect(calls[0]!.query).toContain("pluginPackages");
-  });
-
-  it("returns null when no plugin matches", async () => {
-    const { execute } = executor([{ data: { pluginPackages: [] } }]);
-    expect(await findBackendPluginId(execute, "awesome-tls-backend")).toBeNull();
-  });
-
-  it("returns null when the query errors instead of throwing", async () => {
-    const { execute } = executor([{ errors: [{ message: "nope" }] }]);
-    expect(await findBackendPluginId(execute, "awesome-tls-backend")).toBeNull();
-  });
-
-  it("tolerates a package with no plugins array", async () => {
-    const { execute } = executor([{ data: { pluginPackages: [{ id: "pkg" }] } }]);
-    expect(await findBackendPluginId(execute, "awesome-tls-backend")).toBeNull();
-  });
-});
-
 describe("readRule", () => {
+  it("finds the rule keyed by the id sdk.meta.id() returns", async () => {
+    const { execute } = executor([{ data: { upstreamPlugins: [ruleRow()] } }]);
+
+    expect(await readRule(execute, META_ID)).toEqual({
+      id: "1",
+      enabled: true,
+      allowlist: ["*"],
+      denylist: [],
+    });
+  });
+
   it("returns the rule belonging to this plugin", async () => {
     const { execute } = executor([
       {
         data: {
           upstreamPlugins: [
-            { id: "9", enabled: true, allowlist: ["*"], denylist: [], plugin: { id: "7" } },
-            {
-              id: "10",
-              enabled: false,
-              allowlist: ["a.example"],
-              denylist: [],
-              plugin: { id: "42" },
-            },
+            ruleRow({ id: "9", plugin: { id: "some-other-plugin" } }),
+            ruleRow({ id: "10", enabled: false, allowlist: ["a.example"] }),
           ],
         },
       },
     ]);
 
-    expect(await readRule(execute, "42")).toEqual({
+    expect(await readRule(execute, META_ID)).toEqual({
       id: "10",
       enabled: false,
       allowlist: ["a.example"],
@@ -91,77 +65,58 @@ describe("readRule", () => {
 
   it("returns null when this plugin has no rule", async () => {
     const { execute } = executor([{ data: { upstreamPlugins: [] } }]);
-    expect(await readRule(execute, "42")).toBeNull();
+    expect(await readRule(execute, META_ID)).toBeNull();
   });
 
   it("returns null when the query errors", async () => {
     const { execute } = executor([{ errors: [{ message: "denied" }] }]);
-    expect(await readRule(execute, "42")).toBeNull();
+    expect(await readRule(execute, META_ID)).toBeNull();
   });
 });
 
 describe("enableForAllDomains", () => {
   it("creates a wildcard rule when none exists", async () => {
     const { execute, calls } = executor([
-      packagesResponse(),
       { data: { upstreamPlugins: [] } },
-      {
-        data: {
-          createUpstreamPlugin: {
-            upstream: {
-              id: "11",
-              enabled: true,
-              allowlist: ["*"],
-              denylist: [],
-              plugin: { id: "42" },
-            },
-          },
-        },
-      },
+      { data: { createUpstreamPlugin: { upstream: ruleRow({ id: "11" }) } } },
     ]);
 
-    const rule = await enableForAllDomains(execute, "awesome-tls-backend");
-    expect(rule).toMatchObject({ enabled: true, allowlist: ["*"] });
+    const rule = await enableForAllDomains(execute, META_ID);
+    expect(rule).toMatchObject({ id: "11", enabled: true, allowlist: ["*"] });
 
     const mutation = calls.at(-1)!;
     expect(mutation.query).toContain("createUpstreamPlugin");
     expect(mutation.variables).toEqual({
-      input: { pluginId: "42", allowlist: ["*"], denylist: [], enabled: true },
+      input: { pluginId: META_ID, allowlist: ["*"], denylist: [], enabled: true },
     });
+  });
+
+  // The defect this replaces: the id was translated through a `manifestId`
+  // lookup over `pluginPackages`, which a Caido-internal id never matches, so
+  // the rule was never found and the mutation never ran.
+  it("passes sdk.meta.id() straight through, with no manifest lookup", async () => {
+    const { execute, calls } = executor([
+      { data: { upstreamPlugins: [] } },
+      { data: { createUpstreamPlugin: { upstream: ruleRow({ id: "11" }) } } },
+    ]);
+
+    await enableForAllDomains(execute, META_ID);
+
+    expect(calls.map((c) => c.query).join("\n")).not.toContain("pluginPackages");
+    expect(calls).toHaveLength(2);
   });
 
   it("updates an existing rule rather than creating a second one", async () => {
     const { execute, calls } = executor([
-      packagesResponse(),
       {
         data: {
-          upstreamPlugins: [
-            {
-              id: "10",
-              enabled: false,
-              allowlist: ["old.example"],
-              denylist: [],
-              plugin: { id: "42" },
-            },
-          ],
+          upstreamPlugins: [ruleRow({ id: "10", enabled: false, allowlist: ["old.example"] })],
         },
       },
-      {
-        data: {
-          updateUpstreamPlugin: {
-            upstream: {
-              id: "10",
-              enabled: true,
-              allowlist: ["*"],
-              denylist: [],
-              plugin: { id: "42" },
-            },
-          },
-        },
-      },
+      { data: { updateUpstreamPlugin: { upstream: ruleRow({ id: "10" }) } } },
     ]);
 
-    const rule = await enableForAllDomains(execute, "awesome-tls-backend");
+    const rule = await enableForAllDomains(execute, META_ID);
     expect(rule).toMatchObject({ id: "10", enabled: true, allowlist: ["*"] });
 
     const mutation = calls.at(-1)!;
@@ -169,30 +124,23 @@ describe("enableForAllDomains", () => {
     // The schema takes id alongside input (verified against 0.58.3).
     expect(mutation.variables).toEqual({
       id: "10",
-      input: { pluginId: "42", allowlist: ["*"], denylist: [], enabled: true },
+      input: { pluginId: META_ID, allowlist: ["*"], denylist: [], enabled: true },
     });
-  });
-
-  it("throws a clear error when the plugin id cannot be resolved", async () => {
-    const { execute } = executor([{ data: { pluginPackages: [] } }]);
-    await expect(enableForAllDomains(execute, "awesome-tls-backend")).rejects.toThrow(/plugin id/i);
   });
 
   it("throws when the mutation reports errors", async () => {
     const { execute } = executor([
-      packagesResponse(),
       { data: { upstreamPlugins: [] } },
       { errors: [{ message: "forbidden" }] },
     ]);
-    await expect(enableForAllDomains(execute, "awesome-tls-backend")).rejects.toThrow(/forbidden/);
+    await expect(enableForAllDomains(execute, META_ID)).rejects.toThrow(/forbidden/);
   });
 
   it("throws when the mutation returns no rule", async () => {
     const { execute } = executor([
-      packagesResponse(),
       { data: { upstreamPlugins: [] } },
       { data: { createUpstreamPlugin: { upstream: null } } },
     ]);
-    await expect(enableForAllDomains(execute, "awesome-tls-backend")).rejects.toThrow();
+    await expect(enableForAllDomains(execute, META_ID)).rejects.toThrow();
   });
 });

@@ -583,3 +583,53 @@ Getting there exposed four defects that every unit test had passed:
 Item 4 is the general lesson for this plugin: anything it opens must be either
 short-lived or owned by the helper process, because the plugin gets no chance
 to clean up.
+
+### 11.3.3 `sdk.meta.id()` is the plugin id, not the manifest id (2026-10-03)
+
+The status card reported **"No routing rule: no traffic reaches this plugin
+yet."** while a working wildcard rule was installed and traffic *was* being
+routed — the fingerprints in 11.3.2 were measured through exactly that rule.
+
+`sdk.meta.id()` returns the plugin's Caido-internal id, a UUID:
+
+```
+3aec3301-7889-446d-be57-c9c5de37f113
+```
+
+That is the id `plugins.id` holds, the id `upstream_plugins.plugin_id`
+references, the id GraphQL serialises as `Plugin.id`, and the directory name
+`sdk.meta.path()` resolves to. It is **not** the manifest id
+`awesome-tls-backend`.
+
+`routing.ts` assumed the manifest id and translated it through a
+`pluginPackages { plugins { manifestId } }` lookup. A UUID never matches a
+`manifestId`, so:
+
+- **At boot** the lookup returned `null`, `readRule` was therefore never
+  called, `routing` stayed `null`, and the card asserted that no traffic
+  reached the plugin.
+- **On the button** `enableForAllDomains` threw
+  `could not resolve the plugin id for "3aec3301-…"` — logged three times in
+  `logging.2026-10-03.log`, once per click.
+
+Evidence, from the live install rather than from the schema:
+`upstream_plugins` held exactly one row — `enabled=1`,
+`plugin_id=3aec3301-…`, `allowlist=["*"]`, `denylist=[]` — keyed by the same
+UUID the error message was complaining it could not resolve.
+
+The lookup is now gone and both paths pass `sdk.meta.id()` straight to the
+rule query and mutations. `findBackendPluginId` was deleted with it: it was a
+translation step between two names for the same thing, and its unit tests
+passed only because they asserted against a hand-written `manifestId` shape
+that the host never produces.
+
+Two lessons, both the same shape as item 4 in 11.3.2:
+
+- A unit test that fabricates the host's half of a contract tests the
+  fabrication. The five tests covering `findBackendPluginId` all passed against
+  a response the host never sends.
+- `readRule` returns `null` both for "no rule exists" and for "the query
+  failed", and the card turns that `null` into a confident claim about traffic.
+  The same false message was produced earlier by a different cause — the
+  `GraphQL variables must be an object` read failure in 11.3.2 item 1 — so the
+  conflation is worth removing even though the id fix clears today's instance.

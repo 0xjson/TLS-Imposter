@@ -4,6 +4,13 @@
  *
  * Finer-grained rules stay in Caido's settings; this module only implements the
  * wildcard shortcut and reports the current rule.
+ *
+ * Every call here is keyed by the plugin's Caido-internal id, which is exactly
+ * what `sdk.meta.id()` hands the backend: a UUID such as
+ * "3aec3301-7889-446d-be57-c9c5de37f113" — the same id `sdk.meta.path()` is
+ * named after and the same one the upstream rule row stores. It is *not* the
+ * manifest id "awesome-tls-backend", so it must be passed straight through
+ * rather than looked up (spec 11.3.3).
  */
 
 export type UpstreamRule = {
@@ -17,17 +24,6 @@ export type GraphQLExecute = <T>(
   query: string,
   variables?: Record<string, unknown>,
 ) => Promise<{ data?: T; errors?: { message: string }[] }>;
-
-// The root field is `pluginPackages`; `plugins` does not exist on QueryRoot
-// ("Unknown field \"plugins\" on type \"QueryRoot\"" against Caido 0.58.3).
-const PLUGINS_QUERY = `
-  query awesomeTlsPlugins {
-    pluginPackages {
-      id
-      plugins { __typename id manifestId }
-    }
-  }
-`;
 
 const RULES_QUERY = `
   query awesomeTlsUpstreamPlugins {
@@ -51,29 +47,10 @@ const UPDATE_MUTATION = `
   }
 `;
 
-type PluginRow = { __typename?: string; id: string; manifestId: string };
-type PackageRow = { id: string; plugins?: PluginRow[] };
 type RuleRow = UpstreamRule & { plugin: { id: string } };
 
 function firstError(res: { errors?: { message: string }[] }): string | null {
   return res.errors?.[0]?.message ?? null;
-}
-
-/** Resolves this plugin's Caido-internal id, which the rule mutations need. */
-export async function findBackendPluginId(
-  execute: GraphQLExecute,
-  manifestId: string,
-): Promise<string | null> {
-  const res = await execute<{ pluginPackages: PackageRow[] }>(PLUGINS_QUERY);
-  if (firstError(res) !== null) return null;
-
-  for (const pkg of res.data?.pluginPackages ?? []) {
-    const match = (pkg.plugins ?? []).find(
-      (p) => p.manifestId === manifestId && p.__typename !== "PluginFrontend",
-    );
-    if (match !== undefined) return match.id;
-  }
-  return null;
 }
 
 export async function readRule(
@@ -94,16 +71,8 @@ export async function readRule(
  */
 export async function enableForAllDomains(
   execute: GraphQLExecute,
-  manifestId: string,
+  pluginId: string,
 ): Promise<UpstreamRule> {
-  const pluginId = await findBackendPluginId(execute, manifestId);
-  if (pluginId === null) {
-    throw new Error(
-      `Awesome TLS: could not resolve the plugin id for "${manifestId}"; ` +
-        `add the rule manually under Settings > Upstream > Upstream Plugins`,
-    );
-  }
-
   const existing = await readRule(execute, pluginId);
   const input = { pluginId, allowlist: ["*"], denylist: [], enabled: true };
 
