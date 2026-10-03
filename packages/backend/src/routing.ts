@@ -20,6 +20,19 @@ export type UpstreamRule = {
   denylist: string[];
 };
 
+/**
+ * What is known about this plugin's routing.
+ *
+ * `unknown` is a distinct answer from `none` on purpose: a read that failed
+ * cannot support a claim about whether traffic arrives, and collapsing the two
+ * into one `null` is what let the page announce "no traffic reaches this
+ * plugin yet" over a working rule (spec 11.3.3).
+ */
+export type RoutingState =
+  | { kind: "unknown"; reason: string }
+  | { kind: "none" }
+  | { kind: "rule"; rule: UpstreamRule };
+
 export type GraphQLExecute = <T>(
   query: string,
   variables?: Record<string, unknown>,
@@ -53,30 +66,54 @@ function firstError(res: { errors?: { message: string }[] }): string | null {
   return res.errors?.[0]?.message ?? null;
 }
 
+/**
+ * Total: every failure becomes `unknown` with its reason, never `none` and
+ * never a throw. The caller is a boot phase that the plugin gets no second
+ * chance at, so a malformed row must not escape as a rejection either.
+ */
 export async function readRule(
   execute: GraphQLExecute,
   pluginId: string,
-): Promise<UpstreamRule | null> {
-  const res = await execute<{ upstreamPlugins: RuleRow[] }>(RULES_QUERY);
-  if (firstError(res) !== null) return null;
+): Promise<RoutingState> {
+  try {
+    const res = await execute<{ upstreamPlugins: RuleRow[] }>(RULES_QUERY);
 
-  const row = (res.data?.upstreamPlugins ?? []).find((r) => r.plugin.id === pluginId);
-  if (row === undefined) return null;
-  return strip(row);
+    const err = firstError(res);
+    if (err !== null) return { kind: "unknown", reason: err };
+
+    const rows = res.data?.upstreamPlugins;
+    // An absent field is not an empty rule set; the answer is simply unusable.
+    if (rows === undefined) return { kind: "unknown", reason: "Caido returned no upstreamPlugins" };
+
+    const row = rows.find((r) => r.plugin.id === pluginId);
+    return row === undefined ? { kind: "none" } : { kind: "rule", rule: strip(row) };
+  } catch (err) {
+    return { kind: "unknown", reason: String(err) };
+  }
 }
 
 /**
  * Points every domain at this plugin, updating an existing rule in place so
- * repeated clicks cannot pile up duplicates.
+ * repeated clicks cannot pile up duplicates, and refusing to act at all if the
+ * current rule cannot be read.
  */
 export async function enableForAllDomains(
   execute: GraphQLExecute,
   pluginId: string,
 ): Promise<UpstreamRule> {
-  const existing = await readRule(execute, pluginId);
+  const current = await readRule(execute, pluginId);
+  // Creating on an unreadable state would install a second rule beside the one
+  // it could not see, which is exactly what the update branch exists to avoid.
+  if (current.kind === "unknown") {
+    throw new Error(
+      `Awesome TLS: could not read the current routing rule (${current.reason}), ` +
+        `so nothing was changed; check Settings > Upstream > Upstream Plugins`,
+    );
+  }
+
   const input = { pluginId, allowlist: ["*"], denylist: [], enabled: true };
 
-  if (existing === null) {
+  if (current.kind === "none") {
     const res = await execute<{ createUpstreamPlugin: { upstream: RuleRow | null } }>(
       CREATE_MUTATION,
       { input },
@@ -90,7 +127,7 @@ export async function enableForAllDomains(
 
   const res = await execute<{ updateUpstreamPlugin: { upstream: RuleRow | null } }>(
     UPDATE_MUTATION,
-    { id: existing.id, input },
+    { id: current.rule.id, input },
   );
   const err = firstError(res);
   if (err !== null) throw new Error(`Awesome TLS: ${err}`);

@@ -628,8 +628,29 @@ Two lessons, both the same shape as item 4 in 11.3.2:
 - A unit test that fabricates the host's half of a contract tests the
   fabrication. The five tests covering `findBackendPluginId` all passed against
   a response the host never sends.
-- `readRule` returns `null` both for "no rule exists" and for "the query
-  failed", and the card turns that `null` into a confident claim about traffic.
-  The same false message was produced earlier by a different cause — the
-  `GraphQL variables must be an object` read failure in 11.3.2 item 1 — so the
-  conflation is worth removing even though the id fix clears today's instance.
+- `readRule` returned `null` both for "no rule exists" and for "the query
+  failed", and the card turned that `null` into a confident claim about
+  traffic. The same false message had already been produced by a different
+  cause — the `GraphQL variables must be an object` read failure in 11.3.2
+  item 1 — so the conflation was removed too, below.
+
+#### Routing is now three answers, not two
+
+`readRule` returns `{ kind: "unknown"; reason }`, `{ kind: "none" }` or
+`{ kind: "rule"; rule }`, and is total: a GraphQL error, a rejected executor,
+a missing `upstreamPlugins` field and a malformed row all become `unknown`
+carrying their reason, never `none` and never a throw. That last part matters
+because its caller is a boot phase, and 11.3.2 item 1 is what an unguarded
+boot phase costs.
+
+The card says "Could not read Caido's upstream rules, so routing is unknown."
+with the reason beneath it, and claims nothing about traffic. `routing` also
+starts as `unknown` rather than `null`, so the page does not assert anything
+before Caido has answered.
+
+This closed a second defect of the same shape: `enableForAllDomains` reads the
+current rule to decide create-vs-update, and a failed read looked exactly like
+"no rule exists". It would have taken the create branch and installed a
+*second* rule beside the one it could not see — defeating the duplicate guard
+that branch exists to provide. It now refuses to change anything when the
+current state is `unknown`, and says so.
