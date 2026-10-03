@@ -9,7 +9,7 @@ import { join } from "path";
 
 import { openOneShot502 } from "./fallback";
 import { HelperManager, type CaptureState, type ChildHandle, type HelperState } from "./helper";
-import { enableForAllDomains, readRule, type UpstreamRule } from "./routing";
+import { enableForAllDomains, readRule, type RoutingState } from "./routing";
 import { SettingsStore, type DeepPartial, type Settings } from "./settings";
 import { registerUpstream } from "./upstream";
 
@@ -19,7 +19,7 @@ export type StateDTO = {
   helper: HelperState;
   capture: CaptureState;
   settings: Settings;
-  routing: UpstreamRule | null;
+  routing: RoutingState;
   warnings: string[];
 };
 
@@ -59,7 +59,9 @@ function spawnHelper(exe: string, commandFile: string): ChildHandle {
 export function init(sdk: SDK<API, BackendEvents>) {
   const store = new SettingsStore(join(sdk.meta.path(), "settings.json"));
   let capture: CaptureState = { state: "stopped" };
-  let routing: UpstreamRule | null = null;
+  // Honest until the read lands: the page must not claim anything about
+  // routing before Caido has answered.
+  let routing: RoutingState = { kind: "unknown", reason: "not read yet" };
   let warnings: string[] = [];
 
   const log = (level: "info" | "warn" | "error", msg: string) => {
@@ -193,7 +195,7 @@ export function init(sdk: SDK<API, BackendEvents>) {
 
   sdk.api.register("enableRouting", async () => {
     try {
-      routing = await enableForAllDomains(graphql, sdk.meta.id());
+      routing = { kind: "rule", rule: await enableForAllDomains(graphql, sdk.meta.id()) };
       warnings = [];
     } catch (err) {
       warnings = [String(err)];
@@ -223,12 +225,13 @@ export function init(sdk: SDK<API, BackendEvents>) {
     }
     publish();
 
-    // Routing discovery is cosmetic: it only populates the status card.
-    try {
-      routing = await readRule(graphql, sdk.meta.id());
-      publish();
-    } catch (err) {
-      log("warn", `Awesome TLS: could not read the routing rule: ${String(err)}`);
+    // Routing discovery only populates the status card, but the card reports
+    // whether traffic is being routed, so "could not tell" has to reach it as
+    // itself rather than as "no rule".
+    routing = await readRule(graphql, sdk.meta.id());
+    if (routing.kind === "unknown") {
+      log("warn", `Awesome TLS: could not read the routing rule: ${routing.reason}`);
     }
+    publish();
   })();
 }

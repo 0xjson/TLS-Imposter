@@ -36,10 +36,8 @@ describe("readRule", () => {
     const { execute } = executor([{ data: { upstreamPlugins: [ruleRow()] } }]);
 
     expect(await readRule(execute, META_ID)).toEqual({
-      id: "1",
-      enabled: true,
-      allowlist: ["*"],
-      denylist: [],
+      kind: "rule",
+      rule: { id: "1", enabled: true, allowlist: ["*"], denylist: [] },
     });
   });
 
@@ -56,21 +54,37 @@ describe("readRule", () => {
     ]);
 
     expect(await readRule(execute, META_ID)).toEqual({
-      id: "10",
-      enabled: false,
-      allowlist: ["a.example"],
-      denylist: [],
+      kind: "rule",
+      rule: { id: "10", enabled: false, allowlist: ["a.example"], denylist: [] },
     });
   });
 
-  it("returns null when this plugin has no rule", async () => {
+  it("reports none when the read succeeded and this plugin has no rule", async () => {
     const { execute } = executor([{ data: { upstreamPlugins: [] } }]);
-    expect(await readRule(execute, META_ID)).toBeNull();
+    expect(await readRule(execute, META_ID)).toEqual({ kind: "none" });
   });
 
-  it("returns null when the query errors", async () => {
+  // "none" and "unknown" were one `null` before, and the card turned that null
+  // into "no traffic reaches this plugin yet" — a claim a failed read cannot
+  // support (spec 11.3.3).
+  it("reports unknown, with the reason, when the query errors", async () => {
     const { execute } = executor([{ errors: [{ message: "denied" }] }]);
-    expect(await readRule(execute, META_ID)).toBeNull();
+    expect(await readRule(execute, META_ID)).toEqual({ kind: "unknown", reason: "denied" });
+  });
+
+  it("reports unknown when the executor itself rejects", async () => {
+    const execute = vi.fn(async () => {
+      throw new Error("GraphQL variables must be an object");
+    }) as never;
+
+    const state = await readRule(execute, META_ID);
+    expect(state.kind).toBe("unknown");
+    expect(state.kind === "unknown" && state.reason).toMatch(/variables must be an object/);
+  });
+
+  it("reports unknown when the response carries no upstreamPlugins field", async () => {
+    const { execute } = executor([{ data: {} }]);
+    expect(await readRule(execute, META_ID).then((s) => s.kind)).toBe("unknown");
   });
 });
 
@@ -134,6 +148,17 @@ describe("enableForAllDomains", () => {
       { errors: [{ message: "forbidden" }] },
     ]);
     await expect(enableForAllDomains(execute, META_ID)).rejects.toThrow(/forbidden/);
+  });
+
+  // A failed read used to look exactly like "no rule exists", so the create
+  // branch ran and could install a second rule alongside the one it could not
+  // see — defeating the duplicate guard this function exists to provide.
+  it("refuses to mutate anything when the current rule cannot be read", async () => {
+    const { execute, calls } = executor([{ errors: [{ message: "denied" }] }]);
+
+    await expect(enableForAllDomains(execute, META_ID)).rejects.toThrow(/denied/);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.query).toContain("upstreamPlugins");
   });
 
   it("throws when the mutation returns no rule", async () => {

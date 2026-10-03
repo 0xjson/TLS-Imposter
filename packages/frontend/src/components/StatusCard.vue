@@ -38,14 +38,32 @@ const canRestart = computed(
 
 const routingLabel = computed(() => {
   const r = props.state.routing;
-  if (r === null) return "No routing rule: no traffic reaches this plugin yet.";
-  if (!r.enabled) return "Routing rule exists but is disabled.";
-  const allow = r.allowlist.length === 0 ? "(none)" : r.allowlist.join(", ");
-  const deny = r.denylist.length === 0 ? "" : ` — excluding ${r.denylist.join(", ")}`;
-  return `Routing ${allow}${deny}`;
+  switch (r.kind) {
+    case "unknown":
+      // Deliberately says nothing about whether traffic arrives: the rule could
+      // not be read, so either answer would be a guess.
+      return "Could not read Caido's upstream rules, so routing is unknown.";
+    case "none":
+      return "No routing rule: no traffic reaches this plugin yet.";
+    case "rule": {
+      if (!r.rule.enabled) return "Routing rule exists but is disabled.";
+      const allow = r.rule.allowlist.length === 0 ? "(none)" : r.rule.allowlist.join(", ");
+      const deny =
+        r.rule.denylist.length === 0 ? "" : ` — excluding ${r.rule.denylist.join(", ")}`;
+      return `Routing ${allow}${deny}`;
+    }
+  }
 });
 
-const routingActive = computed(() => props.state.routing?.enabled === true);
+/** The reason behind an `unknown`, shown verbatim so it can be acted on. */
+const routingReason = computed(() =>
+  props.state.routing.kind === "unknown" ? props.state.routing.reason : null,
+);
+
+const routingActive = computed(() => {
+  const r = props.state.routing;
+  return r.kind === "rule" && r.rule.enabled;
+});
 </script>
 
 <template>
@@ -77,6 +95,10 @@ const routingActive = computed(() => props.state.routing?.enabled === true);
         Enable for all domains
       </button>
     </div>
+
+    <p v-if="routingReason !== null" class="text-xs opacity-60 font-mono">
+      {{ routingReason }}
+    </p>
 
     <p class="text-xs opacity-60">
       Per-domain rules live in Settings → Upstream → Upstream Plugins. Caido's own upstream
