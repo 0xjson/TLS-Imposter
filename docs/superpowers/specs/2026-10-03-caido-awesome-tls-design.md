@@ -654,3 +654,88 @@ current rule to decide create-vs-update, and a failed read looked exactly like
 *second* rule beside the one it could not see — defeating the duplicate guard
 that branch exists to provide. It now refuses to change anything when the
 current state is `unknown`, and says so.
+
+### 11.3.4 Task 19, remaining steps (2026-10-04)
+
+Re-run after the routing fix (11.3.3) and a plugin reinstall, which assigned a
+new plugin id and a new upstream rule row. All four frozen values from 11.3.2
+reproduce **exactly**:
+
+| | value |
+|---|---|
+| `http_version` | `h2` |
+| `tls.ja3_hash` | `f984bd5bc7358922cde86ed4471a2e89` |
+| `tls.ja4` | `t13d1516h2_8daaf6152771_806a8c22fdea` |
+| `tls.peetprint_hash` | `67c3e9111bed9e7f03d2f21d6d88994b` |
+| `http2.akamai_fingerprint_hash` | `52d84b11737d980aef856699f885ca86` |
+
+`akamai_fingerprint` is `1:65536;2:0;4:6291456;6:262144|15663105|0|m,a,s,p` —
+Chrome's pseudo-header order — and the HTTP/2 HEADERS frame carries the request
+headers in the order written.
+
+#### Step 7, WebSocket: PASS
+
+A raw client through Caido's proxy to `wss://echo.websocket.org`, a routed host:
+`CONNECT` → `200`, TLS 1.3, `101 Switching Protocols`, the server's welcome
+frame, then a client text frame echoed back byte-exact (`awesome-tls-step7`).
+Caido logged `GET https://echo.websocket.org/ -> 101 313`. The `Upgrade` relay
+works end to end over the spoofed hello.
+
+#### Step 6, capture: the listener works, the feature does not
+
+One verified-correct capture: SNI `tls.peet.ws`, ALPN `[h2, http/1.1]`, a
+1929-byte hello with GREASE and ALPS present, `ja3`
+`1f78531303cc980c815ca3ac63bea56d`, `ja4`
+`t13d1517h2_8daaf6152771_cb7bf5808d99`.
+
+**But the capture cannot be aimed.** `capture.last` keeps the most recent hello,
+and `--proxy-server` sends *every* browser connection through the listener, so
+the browser's own background traffic overwrites the intended capture. Captures
+observed from one browser within minutes: `mtalk.google.com`, `www.gstatic.com`,
+`update.googleapis.com`, `tls.peet.ws`. Chrome's GCM push channel reconnects
+every few seconds and so reliably wins the race;
+`--disable-background-networking`, `--disable-sync` and
+`--disable-component-update` do not stop it.
+
+That is not cosmetic. `mtalk.google.com` is raw TLS on :5228, so its hello
+carries **no ALPN** — JA4 `t13d151500_…`. Selecting such a capture as the
+fingerprint source cannot negotiate HTTP/2 at all, silently discarding the
+HTTP/2 fingerprint the plugin exists to provide. The Capture card shows only
+the hashes, so nothing about this is visible to the user.
+
+Needed: show the captured SNI and ALPN beside the hashes, and either require
+ALPN, filter by SNI, or capture exactly one hello and auto-disable.
+
+#### Chrome shuffles ClientHello extension order
+
+Two captures from the same browser, minutes apart:
+
+| host | `ja3` | `ja4` |
+|---|---|---|
+| `tls.peet.ws` | `1f78531303cc980c815ca3ac63bea56d` | `t13d1517h2_8daaf6152771_cb7bf5808d99` |
+| `www.gstatic.com` | `f40e82dc233cce0a273027b713d27933` | `t13d1517h2_8daaf6152771_cb7bf5808d99` |
+
+**Identical JA4, different JA3.** JA4 sorts the extension list; JA3 preserves
+its order. So a captured hello pins one random ordering and makes JA3 constant,
+where a real Chrome's JA3 varies per connection — a static JA3 is itself a
+signal. Worth stating in the limitations rather than implying `captured` is
+strictly more faithful than a preset.
+
+Captures are also destination-sensitive: `update.googleapis.com` produced an
+18-extension hello (`t13d1518h2_…_e2d80978ab2e`) against 17 for `tls.peet.ws`,
+so Google properties receive a different extension set.
+
+#### Still outstanding
+
+- **Step 6, second half.** `source: captured` needs the page's toggle. Plugin
+  settings are reachable only through the backend RPC; there is no CLI, MCP or
+  GraphQL path to them, and Caido injects the frontend SDK at runtime so the
+  call shape is not in our bundle.
+- **Step 10, Automate.** Proxy and Replay are confirmed (11.1.1 and above);
+  the Caido MCP exposes no way to create an Automate session. `onUpstream` is
+  Caido's single egress path, so the risk of Automate differing is low, but it
+  is unconfirmed.
+- **502 presentation.** Denial is proven — the request never reaches the target
+  — but Caido relayed its own 400 rather than the plugin's 502 body. The
+  keep-alive responder in 6b8bf1b is still unverified in Caido; checking it
+  needs the helper killed and its binary moved aside so it cannot respawn.
