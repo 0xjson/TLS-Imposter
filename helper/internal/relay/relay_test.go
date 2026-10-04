@@ -12,8 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/json/caido-awesome-tls/helper/internal/httpwire"
-	"github.com/json/caido-awesome-tls/helper/internal/preamble"
+	"github.com/0xjson/tls-imposter/helper/internal/httpwire"
+	"github.com/0xjson/tls-imposter/helper/internal/preamble"
 )
 
 // echoUpgradeServer accepts a raw TLS connection, replies 101, then echoes.

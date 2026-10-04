@@ -14,9 +14,9 @@ import (
 
 	utls "github.com/bogdanfinn/utls"
 
-	"github.com/json/caido-awesome-tls/helper/internal/fingerprint"
-	"github.com/json/caido-awesome-tls/helper/internal/httpwire"
-	"github.com/json/caido-awesome-tls/helper/internal/preamble"
+	"github.com/0xjson/tls-imposter/helper/internal/fingerprint"
+	"github.com/0xjson/tls-imposter/helper/internal/httpwire"
+	"github.com/0xjson/tls-imposter/helper/internal/preamble"
 )
 
 // Relay owns conn for the rest of its life: it dials the target, replays the

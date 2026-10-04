@@ -165,7 +165,7 @@ func TestForwardsARequestThroughTheHelper(t *testing.T) {
 		"timeoutSec":  30,
 	}
 	b, _ := json.Marshal(pre)
-	fmt.Fprintf(conn, "AWESOMETLS/1 %s\n", b)
+	fmt.Fprintf(conn, "TLSIMPOSTER/1 %s\n", b)
 	_, _ = io.WriteString(conn, "GET /x HTTP/1.1\r\nHost: decoy.invalid\r\n\r\n")
 
 	res, err := http.ReadResponse(bufio.NewReader(conn), nil)
@@ -203,7 +203,7 @@ func TestRejectsAnUnauthenticatedConnection(t *testing.T) {
 		"timeoutSec":  30,
 	}
 	b, _ := json.Marshal(pre)
-	fmt.Fprintf(conn, "AWESOMETLS/1 %s\n", b)
+	fmt.Fprintf(conn, "TLSIMPOSTER/1 %s\n", b)
 	_, _ = io.WriteString(conn, "GET / HTTP/1.1\r\nHost: example.com\r\n\r\n")
 
 	_ = conn.SetReadDeadline(time.Now().Add(3 * time.Second))

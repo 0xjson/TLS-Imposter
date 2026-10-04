@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/json/caido-awesome-tls/helper/internal/preamble"
+	"github.com/0xjson/tls-imposter/helper/internal/preamble"
 )
 
 func cfg(profile, hello string, timeout int) *preamble.Config {

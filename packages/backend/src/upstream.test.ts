@@ -68,7 +68,7 @@ describe("upstream handler", () => {
 
     expect(conn.send).toHaveBeenCalledTimes(1);
     const sent = conn.send.mock.calls[0]![0] as string;
-    expect(sent.startsWith("AWESOMETLS/1 ")).toBe(true);
+    expect(sent.startsWith("TLSIMPOSTER/1 ")).toBe(true);
     expect(sent).toContain('"host":"example.com"');
     expect(sent.endsWith("\n")).toBe(true);
 

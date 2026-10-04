@@ -78,7 +78,7 @@ function setup() {
 
   const written: { path: string; body: string }[] = [];
   const manager = new HelperManager({
-    exe: "C:/fake/awesome-tls-helper.exe",
+    exe: "C:/fake/tls-imposter-helper.exe",
     commandFile: "C:/fake/data/command.json",
     writeCommand: async (path, body) => {
       written.push({ path, body });

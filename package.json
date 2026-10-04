@@ -1,9 +1,9 @@
 {
-  "name": "caido-awesome-tls",
+  "name": "tls-imposter",
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "build:helper": "cd helper && GOOS=windows GOARCH=amd64 go build -trimpath -ldflags \"-s -w -H windowsgui\" -o ../packages/backend/assets/bin/awesome-tls-helper.exe ./cmd/awesome-tls-helper",
+    "build:helper": "cd helper && GOOS=windows GOARCH=amd64 go build -trimpath -ldflags \"-s -w -H windowsgui\" -o ../packages/backend/assets/bin/tls-imposter-helper.exe ./cmd/tls-imposter-helper",
     "build": "pnpm build:helper && caido-dev build",
     "build:plugin": "caido-dev build",
     "test:helper": "cd helper && go test ./...",

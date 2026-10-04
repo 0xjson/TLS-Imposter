@@ -1,4 +1,4 @@
-// Command awesome-tls-helper forwards HTTP requests with a chosen browser's
+// Command tls-imposter-helper forwards HTTP requests with a chosen browser's
 // TLS and HTTP/2 fingerprint.
 //
 // It is started by the Caido plugin and speaks a JSON-lines protocol over
@@ -16,11 +16,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/json/caido-awesome-tls/helper/internal/capture"
-	"github.com/json/caido-awesome-tls/helper/internal/control"
-	"github.com/json/caido-awesome-tls/helper/internal/fingerprint"
-	"github.com/json/caido-awesome-tls/helper/internal/forward"
-	"github.com/json/caido-awesome-tls/helper/internal/relay"
+	"github.com/0xjson/tls-imposter/helper/internal/capture"
+	"github.com/0xjson/tls-imposter/helper/internal/control"
+	"github.com/0xjson/tls-imposter/helper/internal/fingerprint"
+	"github.com/0xjson/tls-imposter/helper/internal/forward"
+	"github.com/0xjson/tls-imposter/helper/internal/relay"
 )
 
 const version = "0.1.0"

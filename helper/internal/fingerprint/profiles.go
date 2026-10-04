@@ -48,7 +48,7 @@ func Lookup(name string) (profiles.ClientProfile, bool) {
 // HTTP/2, so that half must still come from a named profile.
 func WithClientHello(base profiles.ClientProfile, spec *utls.ClientHelloSpec) profiles.ClientProfile {
 	id := utls.ClientHelloID{
-		Client:      "AwesomeTLSCaptured",
+		Client:      "TLSImposterCaptured",
 		Version:     "1",
 		SpecFactory: func() (utls.ClientHelloSpec, error) { return *spec, nil },
 	}

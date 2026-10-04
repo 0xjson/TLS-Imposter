@@ -5,7 +5,13 @@ import { join } from "node:path";
 
 import { DEFAULTS, SettingsStore, validate } from "./settings";
 
-const opts = { profiles: ["chrome_150", "firefox_148"], fallbackProfile: "chrome_150" };
+// Includes the shipped default, as a real helper's list of 80-odd profiles
+// does. Without it these cases exercise the fallback path by accident rather
+// than the defaults they claim to assert.
+const opts = {
+  profiles: [DEFAULTS.profile, "chrome_150", "firefox_148"],
+  fallbackProfile: "chrome_150",
+};
 
 describe("validate", () => {
   it("returns the defaults for absent input", () => {
@@ -38,7 +44,7 @@ describe("validate", () => {
 
   it("falls back and warns when the profile is unknown", () => {
     const { settings, warnings } = validate({ profile: "netscape_4" }, opts);
-    expect(settings.profile).toBe("chrome_150");
+    expect(settings.profile).toBe(DEFAULTS.profile);
     expect(warnings.join(" ")).toContain("netscape_4");
   });
 
@@ -130,7 +136,7 @@ describe("validate", () => {
 describe("SettingsStore", () => {
   let dir: string;
   beforeEach(() => {
-    dir = mkdtempSync(join(tmpdir(), "awesome-tls-"));
+    dir = mkdtempSync(join(tmpdir(), "tls-imposter-"));
   });
   afterEach(() => {
     rmSync(dir, { recursive: true, force: true });
@@ -230,5 +236,47 @@ describe("SettingsStore", () => {
 
     await store.update({ capture: { last: null } }, opts);
     expect(store.get().capture.last).toBeNull();
+  });
+});
+
+// The shipped default must win over tls-client's library default, which tracks
+// newest Chrome. Caido drives its own bundled Chromium, and a fingerprint from
+// a newer Chrome than the browser sending the headers is the inconsistency this
+// plugin exists to remove (measured: the bundled Chromium 147 produces
+// chrome_146's JA4 exactly -- spec 11.3.5).
+describe("default profile", () => {
+  it("prefers the shipped default over the helper's library default", () => {
+    const { settings, warnings } = validate(
+      {},
+      { profiles: ["chrome_146", "chrome_150", "chrome_152"], fallbackProfile: "chrome_150" },
+    );
+    expect(settings.profile).toBe(DEFAULTS.profile);
+    expect(settings.profile).toBe("chrome_146");
+    expect(warnings).toEqual([]);
+  });
+
+  it("falls back to the helper's default when the shipped one is absent", () => {
+    const { settings } = validate(
+      {},
+      { profiles: ["chrome_150", "chrome_152"], fallbackProfile: "chrome_150" },
+    );
+    expect(settings.profile).toBe("chrome_150");
+  });
+
+  it("still replaces a stored profile the helper does not have", () => {
+    const { settings, warnings } = validate(
+      { profile: "chrome_999" },
+      { profiles: ["chrome_146", "chrome_150"], fallbackProfile: "chrome_150" },
+    );
+    expect(settings.profile).toBe("chrome_146");
+    expect(warnings[0]).toMatch(/chrome_999.*not available.*chrome_146/);
+  });
+
+  it("keeps a stored profile the helper does have", () => {
+    const { settings } = validate(
+      { profile: "chrome_152" },
+      { profiles: ["chrome_146", "chrome_152"], fallbackProfile: "chrome_150" },
+    );
+    expect(settings.profile).toBe("chrome_152");
   });
 });

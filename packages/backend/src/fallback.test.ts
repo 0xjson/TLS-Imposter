@@ -44,10 +44,10 @@ describe("openOneShot502", () => {
     try {
       const raw = await fetchRaw(r.port);
       expect(raw.startsWith("HTTP/1.1 502 Bad Gateway\r\n")).toBe(true);
-      expect(raw).toContain("X-Awesome-Tls-Error: helper unavailable");
+      expect(raw).toContain("X-Tls-Imposter-Error: helper unavailable");
       expect(raw).toMatch(/Content-Length: \d+/);
       // The body must explain why, so the operator is not left guessing.
-      expect(raw.split("\r\n\r\n")[1]).toContain("Awesome TLS");
+      expect(raw.split("\r\n\r\n")[1]).toContain("TLS Imposter");
     } finally {
       r.close();
     }

@@ -17,7 +17,7 @@
 import { createServer, type Server, type Socket } from "net";
 
 const BODY =
-  "Awesome TLS: the fingerprint helper is unavailable, so this request was " +
+  "TLS Imposter: the fingerprint helper is unavailable, so this request was " +
   "blocked rather than sent with Caido's own TLS fingerprint.\n";
 
 /**
@@ -32,7 +32,7 @@ const BODY =
 const RESPONSE =
   "HTTP/1.1 502 Bad Gateway\r\n" +
   "Content-Type: text/plain; charset=utf-8\r\n" +
-  "X-Awesome-Tls-Error: helper unavailable\r\n" +
+  "X-Tls-Imposter-Error: helper unavailable\r\n" +
   `Content-Length: ${BODY.length}\r\n` +
   "Connection: keep-alive\r\n" +
   "\r\n" +
@@ -110,7 +110,7 @@ export function openOneShot502(
     });
 
     server.on("error", (err: Error) => {
-      log("error", `Awesome TLS: 502 responder error: ${err.message}`);
+      log("error", `TLS Imposter: 502 responder error: ${err.message}`);
       reject(err);
     });
 

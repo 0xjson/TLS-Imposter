@@ -30,7 +30,12 @@ export type Settings = {
 
 export const DEFAULTS: Settings = {
   source: "preset",
-  profile: "chrome_150",
+  // Matches Caido's own bundled Chromium, which is the browser most traffic
+  // through this plugin comes from. Measured, not guessed: that browser's
+  // ClientHello yields chrome_146's JA4 exactly (spec 11.3.5). Revisit when
+  // Caido ships a newer Chromium — a profile from a *newer* Chrome than the
+  // browser sending the headers reintroduces a mismatch.
+  profile: "chrome_146",
   timeoutSec: 30,
   capture: {
     enabled: false,
@@ -124,6 +129,15 @@ export function validate(
   const source: FingerprintSource =
     input.source === "preset" || input.source === "captured" ? input.source : DEFAULTS.source;
 
+  // The shipped default wins over the helper's, which reports tls-client's
+  // library default and so tracks the newest Chrome the library knows. Caido
+  // drives its own bundled Chromium, and a fingerprint from a newer Chrome than
+  // the browser sending the headers is exactly the inconsistency this plugin
+  // exists to remove (spec 11.3.5).
+  const preferred = opts.profiles.includes(DEFAULTS.profile)
+    ? DEFAULTS.profile
+    : opts.fallbackProfile;
+
   let profile = DEFAULTS.profile;
   if (typeof input.profile === "string" && input.profile !== "") {
     // An empty profile list means the helper has not reported yet; accept the
@@ -131,11 +145,11 @@ export function validate(
     if (opts.profiles.length === 0 || opts.profiles.includes(input.profile)) {
       profile = input.profile;
     } else {
-      warnings.push(`profile: "${input.profile}" is not available; using ${opts.fallbackProfile}`);
-      profile = opts.fallbackProfile;
+      warnings.push(`profile: "${input.profile}" is not available; using ${preferred}`);
+      profile = preferred;
     }
-  } else if (opts.fallbackProfile !== "") {
-    profile = opts.fallbackProfile;
+  } else if (preferred !== "") {
+    profile = preferred;
   }
 
   let timeoutSec = DEFAULTS.timeoutSec;

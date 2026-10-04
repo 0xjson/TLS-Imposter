@@ -9,7 +9,7 @@
  * what `sdk.meta.id()` hands the backend: a UUID such as
  * "3aec3301-7889-446d-be57-c9c5de37f113" — the same id `sdk.meta.path()` is
  * named after and the same one the upstream rule row stores. It is *not* the
- * manifest id "awesome-tls-backend", so it must be passed straight through
+ * manifest id "tls-imposter-backend", so it must be passed straight through
  * rather than looked up (spec 11.3.3).
  */
 
@@ -39,13 +39,13 @@ export type GraphQLExecute = <T>(
 ) => Promise<{ data?: T; errors?: { message: string }[] }>;
 
 const RULES_QUERY = `
-  query awesomeTlsUpstreamPlugins {
+  query tlsImposterUpstreamPlugins {
     upstreamPlugins { id enabled allowlist denylist plugin { id } }
   }
 `;
 
 const CREATE_MUTATION = `
-  mutation awesomeTlsCreateUpstream($input: CreateUpstreamPluginInput!) {
+  mutation tlsImposterCreateUpstream($input: CreateUpstreamPluginInput!) {
     createUpstreamPlugin(input: $input) {
       upstream { id enabled allowlist denylist plugin { id } }
     }
@@ -53,7 +53,7 @@ const CREATE_MUTATION = `
 `;
 
 const UPDATE_MUTATION = `
-  mutation awesomeTlsUpdateUpstream($id: ID!, $input: UpdateUpstreamPluginInput!) {
+  mutation tlsImposterUpdateUpstream($id: ID!, $input: UpdateUpstreamPluginInput!) {
     updateUpstreamPlugin(id: $id, input: $input) {
       upstream { id enabled allowlist denylist plugin { id } }
     }
@@ -106,7 +106,7 @@ export async function enableForAllDomains(
   // it could not see, which is exactly what the update branch exists to avoid.
   if (current.kind === "unknown") {
     throw new Error(
-      `Awesome TLS: could not read the current routing rule (${current.reason}), ` +
+      `TLS Imposter: could not read the current routing rule (${current.reason}), ` +
         `so nothing was changed; check Settings > Upstream > Upstream Plugins`,
     );
   }
@@ -119,9 +119,9 @@ export async function enableForAllDomains(
       { input },
     );
     const err = firstError(res);
-    if (err !== null) throw new Error(`Awesome TLS: ${err}`);
+    if (err !== null) throw new Error(`TLS Imposter: ${err}`);
     const upstream = res.data?.createUpstreamPlugin.upstream;
-    if (!upstream) throw new Error("Awesome TLS: Caido created no upstream rule");
+    if (!upstream) throw new Error("TLS Imposter: Caido created no upstream rule");
     return strip(upstream);
   }
 
@@ -130,9 +130,9 @@ export async function enableForAllDomains(
     { id: current.rule.id, input },
   );
   const err = firstError(res);
-  if (err !== null) throw new Error(`Awesome TLS: ${err}`);
+  if (err !== null) throw new Error(`TLS Imposter: ${err}`);
   const upstream = res.data?.updateUpstreamPlugin.upstream;
-  if (!upstream) throw new Error("Awesome TLS: Caido returned no upstream rule");
+  if (!upstream) throw new Error("TLS Imposter: Caido returned no upstream rule");
   return strip(upstream);
 }
 
