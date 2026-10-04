@@ -72,10 +72,10 @@ func WriteError(w io.Writer, code int, reason string, detail error) error {
 	// string has no use for one, and leaving it in invites doubt about whether
 	// the framing is safe.
 	msg = sanitizeHeaderValue(msg)
-	body := []byte("Awesome TLS: " + msg + "\n")
+	body := []byte("TLS Imposter: " + msg + "\n")
 	return WriteResponse(w, code, reason, []Header{
 		{"Content-Type", "text/plain; charset=utf-8"},
-		{"X-Awesome-Tls-Error", msg},
+		{"X-Tls-Imposter-Error", msg},
 		{"Connection", "close"},
 	}, body, true)
 }

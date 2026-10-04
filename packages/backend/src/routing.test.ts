@@ -4,7 +4,7 @@ import { enableForAllDomains, readRule } from "./routing";
 
 /**
  * The id Caido hands the backend through `sdk.meta.id()`: its Caido-internal
- * plugin id, not the manifest id "awesome-tls-backend". Taken verbatim from a
+ * plugin id, not the manifest id "tls-imposter-backend". Taken verbatim from a
  * live install, where it is also the `plugin_id` of the upstream rule row
  * (Caido 0.58.3).
  */

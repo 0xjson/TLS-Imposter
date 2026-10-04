@@ -5,7 +5,7 @@
  */
 import type { Settings } from "./settings";
 
-export const MAGIC = "AWESOMETLS/1 ";
+export const MAGIC = "TLSIMPOSTER/1 ";
 
 export type PreambleArgs = {
   token: string;

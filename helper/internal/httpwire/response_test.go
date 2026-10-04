@@ -105,7 +105,7 @@ func TestWriteErrorCarriesDiagnosticHeaderAndBody(t *testing.T) {
 	if !strings.HasPrefix(out, "HTTP/1.1 502 Bad Gateway\r\n") {
 		t.Errorf("status line = %q", out)
 	}
-	if !strings.Contains(out, "X-Awesome-Tls-Error: dial tcp: refused\r\n") {
+	if !strings.Contains(out, "X-Tls-Imposter-Error: dial tcp: refused\r\n") {
 		t.Errorf("want diagnostic header, got:\n%s", out)
 	}
 	if !strings.Contains(out, "dial tcp: refused") {

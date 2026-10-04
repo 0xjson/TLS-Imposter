@@ -26,7 +26,7 @@ function decode(text: string): { magic: string; json: Record<string, unknown> } 
 describe("buildPreamble", () => {
   it("emits the magic prefix, one JSON object and a trailing newline", () => {
     const { magic, json } = decode(buildPreamble(args));
-    expect(magic).toBe("AWESOMETLS/1 ");
+    expect(magic).toBe("TLSIMPOSTER/1 ");
     expect(json).toEqual({
       token: "abc123",
       target: { host: "example.com", port: 443, tls: true },
@@ -62,10 +62,10 @@ describe("buildPreamble", () => {
   // JSON.stringify escapes control characters, so a hostile host cannot forge a
   // second preamble line; assert that rather than trusting it.
   it("escapes a newline inside a field instead of splitting the line", () => {
-    const text = buildPreamble({ ...args, host: "evil\nAWESOMETLS/1 {}" });
+    const text = buildPreamble({ ...args, host: "evil\nTLSIMPOSTER/1 {}" });
     expect(text.split("\n")).toHaveLength(2);
     const { json } = decode(text);
-    expect((json.target as Record<string, unknown>).host).toBe("evil\nAWESOMETLS/1 {}");
+    expect((json.target as Record<string, unknown>).host).toBe("evil\nTLSIMPOSTER/1 {}");
   });
 
   it("rejects a token containing a line break, which would forge a second line", () => {

@@ -51,8 +51,10 @@ func TestReadRejectsBadMagicAndOverlongLine(t *testing.T) {
 // A truncated stream must not block or be mistaken for a valid preamble.
 func TestReadRejectsTruncatedInput(t *testing.T) {
 	for name, in := range map[string]string{
-		"empty":           "",
-		"partial magic":   "AWESOME",
+		"empty": "",
+		// Sliced from Magic so renaming the protocol cannot leave this case
+		// testing an unrelated string instead of a truncated magic.
+		"partial magic":   Magic[:6],
 		"magic only":      Magic,
 		"no newline":      Magic + `{"token":"x"}`,
 		"invalid json":    Magic + "{not json}\n",

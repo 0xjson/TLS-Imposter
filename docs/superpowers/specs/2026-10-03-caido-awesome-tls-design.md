@@ -1,7 +1,13 @@
-# Caido Awesome TLS — Design
+# TLS Imposter — Design
 
 - **Date:** 2026-10-03
 - **Status:** Draft, awaiting review
+- **Renamed 2026-10-04:** the project was called *Awesome TLS* while this
+  document was written, after the Burp extension that inspired it. The name was
+  changed to **TLS Imposter** to stop implying either a port of that extension
+  or a wrapper around Caido's own `tls-impersonate` library. Identifiers,
+  quoted log lines and recorded plugin ids below are left as they were
+  captured — they are evidence, and rewriting them would falsify the record.
 - **Prior art:** [sleeyax/burp-awesome-tls](https://github.com/sleeyax/burp-awesome-tls) (Burp Suite extension, GPL-3.0)
 
 ## 1. Purpose
@@ -739,3 +745,51 @@ so Google properties receive a different extension set.
   — but Caido relayed its own 400 rather than the plugin's 502 body. The
   keep-alive responder in 6b8bf1b is still unverified in Caido; checking it
   needs the helper killed and its binary moved aside so it cannot respawn.
+
+### 11.3.5 Profile selection is measurable, and the default was wrong (2026-10-04)
+
+The shipped default was `chrome_150`, inherited from `tls-client`'s library
+default, which tracks the newest Chrome the library knows. That is the wrong
+default for a Caido plugin: most traffic through it comes from Caido's own
+bundled Chromium, and a handshake from a *newer* Chrome than the browser
+sending the headers reintroduces exactly the mismatch the plugin exists to
+remove.
+
+Every preset's ClientHello can be built and fingerprinted offline, without
+Caido, by applying the profile through uTLS and running the result through
+`fingerprint.Analyze`. Validating the method first: `chrome_150` computes to
+`t13d1516h2_8daaf6152771_806a8c22fdea`, byte-identical to what `tls.peet.ws`
+reported for the plugin in 11.3.2.
+
+Two browsers measured against that, by capturing their real ClientHello off
+the wire with the capture listener:
+
+| Browser | measured JA4 | matching preset |
+|---|---|---|
+| Caido bundled Chromium **147**.0.7693.0 | `t13d1517h2_8daaf6152771_dcad5a053991` | **`chrome_146`** — exact |
+| Installed Google Chrome **154**.0.8037.93 | `t13d1517h2_8daaf6152771_cb7bf5808d99` | **`chrome_152`** — exact |
+
+`chrome_146` and `chrome_152` carry an **identical extension set**, differing
+only in their signature-algorithm list, which is the whole of the JA4c
+difference. `chrome_150` lacks extension `51764` (`0xca34`) that both real
+browsers send, so the old default was a worse match than either.
+
+The default is now `chrome_146`, and `validate` prefers the shipped default
+over the helper's reported library default whenever the helper lists it. Revisit
+when Caido ships a newer bundled Chromium.
+
+Two traps worth recording:
+
+- **The measurement is circular if routing is on.** A request to `tls.peet.ws`
+  through Caido with routing enabled reports the *preset's* fingerprint, not the
+  browser's. One such reading was nearly mistaken for a real Chrome 154
+  handshake; it was `chrome_146`'s, i.e. the plugin's own output. The browser's
+  own hello must come from the capture listener, or from a request made with
+  routing off.
+- **`source=ChromiumBrowser` in a Google URL does not identify Caido's
+  browser.** Regular Chrome sends it too. The reliable discriminator is
+  `sec-ch-ua`: official builds carry a `"Google Chrome"` brand, Caido's
+  Chromium does not.
+
+JA4 was stable across hosts for a given browser while JA3 varied, which is
+11.3.4's extension-shuffling finding reproduced on a second browser.

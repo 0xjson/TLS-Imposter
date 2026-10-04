@@ -11,8 +11,8 @@ import (
 
 	tls_client "github.com/bogdanfinn/tls-client"
 
-	"github.com/json/caido-awesome-tls/helper/internal/fingerprint"
-	"github.com/json/caido-awesome-tls/helper/internal/preamble"
+	"github.com/0xjson/tls-imposter/helper/internal/fingerprint"
+	"github.com/0xjson/tls-imposter/helper/internal/preamble"
 )
 
 type entry struct {

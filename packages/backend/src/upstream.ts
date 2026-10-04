@@ -62,13 +62,13 @@ export function makeUpstreamHandler(deps: UpstreamDeps) {
       const port = await deps.openDenial();
       if (port === null) {
         throw new Error(
-          `Awesome TLS: helper is down (${deps.helper.state().kind}) and the ` +
+          `TLS Imposter: helper is down (${deps.helper.state().kind}) and the ` +
             `502 responder could not be opened; request may leave unspoofed`,
         );
       }
       deps.log(
         "warn",
-        `Awesome TLS: helper down; answering 502 for ${describeTarget(request)}`,
+        `TLS Imposter: helper down; answering 502 for ${describeTarget(request)}`,
       );
       return { connection: await sdk.net.connect(`tcp://127.0.0.1:${port}`) };
     }

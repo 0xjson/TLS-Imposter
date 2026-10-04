@@ -10,8 +10,8 @@ import (
 	fhttp "github.com/bogdanfinn/fhttp"
 	tls_client "github.com/bogdanfinn/tls-client"
 
-	"github.com/json/caido-awesome-tls/helper/internal/httpwire"
-	"github.com/json/caido-awesome-tls/helper/internal/preamble"
+	"github.com/0xjson/tls-imposter/helper/internal/httpwire"
+	"github.com/0xjson/tls-imposter/helper/internal/preamble"
 )
 
 // Result is an upstream answer, read fully into memory.

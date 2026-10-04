@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	Magic      = "AWESOMETLS/1 "
+	Magic      = "TLSIMPOSTER/1 "
 	MaxLineLen = 64 * 1024
 )
 

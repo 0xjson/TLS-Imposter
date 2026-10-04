@@ -1,4 +1,4 @@
-module github.com/json/caido-awesome-tls/helper
+module github.com/0xjson/tls-imposter/helper
 
 go 1.26
 

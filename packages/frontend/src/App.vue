@@ -33,7 +33,7 @@ async function call(fn: () => Promise<StateDTO>, viaToast = true) {
       // Nothing has ever loaded, so there is no UI to annotate: explain inline.
       unreachable.value = msg;
     } else if (viaToast) {
-      props.sdk.window.showToast(`Awesome TLS: ${msg}`, { variant: "error" });
+      props.sdk.window.showToast(`TLS Imposter: ${msg}`, { variant: "error" });
     }
   } finally {
     busy.value = false;
@@ -64,7 +64,7 @@ onUnmounted(() => subscription?.stop());
 <template>
   <div class="p-6 flex flex-col gap-4 overflow-auto h-full">
     <header>
-      <h1 class="text-xl font-semibold">Awesome TLS</h1>
+      <h1 class="text-xl font-semibold">TLS Imposter</h1>
       <p class="text-sm opacity-70">
         Sends routed requests with a real browser's TLS and HTTP/2 fingerprint.
       </p>
@@ -77,7 +77,7 @@ onUnmounted(() => subscription?.stop());
       <h2 class="font-semibold text-amber-500">Backend unavailable</h2>
       <p class="text-sm">
         This page cannot reach the plugin's backend. The most common reason is that the
-        <strong>Awesome TLS backend component is disabled</strong> — enable it under
+        <strong>TLS Imposter backend component is disabled</strong> — enable it under
         Plugins, then retry.
       </p>
       <p class="text-xs opacity-60 font-mono">{{ unreachable }}</p>

@@ -13,7 +13,7 @@ import { enableForAllDomains, readRule, type RoutingState } from "./routing";
 import { SettingsStore, type DeepPartial, type Settings } from "./settings";
 import { registerUpstream } from "./upstream";
 
-const HELPER_EXE = "awesome-tls-helper.exe";
+const HELPER_EXE = "tls-imposter-helper.exe";
 
 export type StateDTO = {
   helper: HelperState;
@@ -99,14 +99,14 @@ export function init(sdk: SDK<API, BackendEvents>) {
     try {
       sdk.api.send("state", snapshot());
     } catch (err) {
-      log("warn", `Awesome TLS: could not publish state: ${String(err)}`);
+      log("warn", `TLS Imposter: could not publish state: ${String(err)}`);
     }
   };
 
   const helper = new HelperManager({
     // caido-dev's asset copier flattens each matched file to its basename, so
     // the binary lands directly in the assets directory rather than under bin/
-    // (verified in dist/plugin_package/awesome-tls-backend/assets/).
+    // (verified in dist/plugin_package/tls-imposter-backend/assets/).
     exe: join(sdk.meta.assetsPath(), HELPER_EXE),
     // Commands travel through a file, not stdin: Caido's child_process does
     // not deliver writes to a child's stdin (verified against Caido 0.58.3).
@@ -150,7 +150,7 @@ export function init(sdk: SDK<API, BackendEvents>) {
       const r = await openOneShot502(log);
       return r.port;
     } catch (err) {
-      log("error", `Awesome TLS: could not open a 502 responder: ${String(err)}`);
+      log("error", `TLS Imposter: could not open a 502 responder: ${String(err)}`);
       return null;
     }
   };
@@ -215,13 +215,13 @@ export function init(sdk: SDK<API, BackendEvents>) {
       warnings = await store.load({ profiles: [], fallbackProfile: store.get().profile });
     } catch (err) {
       warnings = [`settings could not be loaded: ${String(err)}`];
-      log("error", `Awesome TLS: ${warnings[0]}`);
+      log("error", `TLS Imposter: ${warnings[0]}`);
     }
 
     try {
       await helper.start();
     } catch (err) {
-      log("error", `Awesome TLS: helper failed to start: ${String(err)}`);
+      log("error", `TLS Imposter: helper failed to start: ${String(err)}`);
     }
     publish();
 
@@ -230,7 +230,7 @@ export function init(sdk: SDK<API, BackendEvents>) {
     // itself rather than as "no rule".
     routing = await readRule(graphql, sdk.meta.id());
     if (routing.kind === "unknown") {
-      log("warn", `Awesome TLS: could not read the routing rule: ${routing.reason}`);
+      log("warn", `TLS Imposter: could not read the routing rule: ${routing.reason}`);
     }
     publish();
   })();

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/json/caido-awesome-tls/helper/internal/httpwire"
-	"github.com/json/caido-awesome-tls/helper/internal/preamble"
+	"github.com/0xjson/tls-imposter/helper/internal/httpwire"
+	"github.com/0xjson/tls-imposter/helper/internal/preamble"
 )
 
 const testToken = "testtoken0123456789"
@@ -132,10 +132,10 @@ func TestHandleKeepsConnectionUsableAfterAnErrorResponse(t *testing.T) {
 	if res.StatusCode != 502 && res.StatusCode != 504 {
 		t.Errorf("StatusCode = %d, want 502 or 504", res.StatusCode)
 	}
-	if res.Header.Get("X-Awesome-Tls-Error") == "" {
-		t.Error("want X-Awesome-Tls-Error on the error response")
+	if res.Header.Get("X-Tls-Imposter-Error") == "" {
+		t.Error("want X-Tls-Imposter-Error on the error response")
 	}
-	if !strings.Contains(string(body), "Awesome TLS") {
+	if !strings.Contains(string(body), "TLS Imposter") {
 		t.Errorf("body = %q, want the helper's error text", body)
 	}
 	// ReadResponse succeeding and the body terminating proves the client is not
