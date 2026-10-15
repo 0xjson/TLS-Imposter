@@ -13,7 +13,7 @@ func TestProfilesAreSortedNonEmptyAndContainKnownNames(t *testing.T) {
 	if !sort.StringsAreSorted(got) {
 		t.Error("Profiles() must be sorted so the UI dropdown is stable")
 	}
-	want := map[string]bool{"chrome_150": false, "firefox_148": false, "safari_ios_26_0": false}
+	want := map[string]bool{"chrome_150": false, "firefox_148": false, "firefox_158": false, "safari_ios_26_0": false}
 	for _, p := range got {
 		if _, ok := want[p]; ok {
 			want[p] = true
