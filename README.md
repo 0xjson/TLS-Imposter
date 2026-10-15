@@ -61,16 +61,17 @@ Per-host rules live in **Settings → Upstream → Upstream Plugins**.
 
 ## 🎯 Choosing a profile
 
-83 profiles ship with the plugin — 28 Chrome, 16 Firefox, 10 Safari/iOS, plus Brave, Opera and mobile apps.
+84 profiles ship with the plugin — 28 Chrome, 17 Firefox, 10 Safari/iOS, plus Brave, Opera and mobile apps.
 
 **Match the profile to the browser whose headers pass through.** A `chrome_152` handshake under a Chromium 147 `User-Agent` is a new mismatch replacing the old one.
 
-Two browsers measured by capturing their real ClientHello off the wire:
+Three browsers measured by capturing their real ClientHello off the wire:
 
 | Browser | Measured JA4 | Profile |
 |---|---|---|
 | 🧩 Caido's bundled Chromium **147** | `t13d1517h2_8daaf6152771_dcad5a053991` | **`chrome_146`** ← default |
 | 🌐 Google Chrome **154** | `t13d1517h2_8daaf6152771_cb7bf5808d99` | **`chrome_152`** |
+| 🦊 Firefox **158** | `t13d1517h2_8daaf6152771_3cbfd9057e0d` | **`firefox_158`** |
 
 The default is `chrome_146` because Caido drives its own browser. Revisit it when Caido ships a newer Chromium.
 

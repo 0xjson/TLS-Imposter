@@ -10,7 +10,14 @@ import (
 
 // Profiles lists every bundled profile name, sorted.
 func Profiles() []string {
-	return slices.Sorted(maps.Keys(profiles.MappedTLSClients))
+	names := slices.Collect(maps.Keys(profiles.MappedTLSClients))
+	for name := range extraProfiles {
+		if _, ok := profiles.MappedTLSClients[name]; !ok {
+			names = append(names, name)
+		}
+	}
+	slices.Sort(names)
+	return names
 }
 
 // DefaultProfile is the library's current default, which tracks recent Chrome.
@@ -38,7 +45,10 @@ func DefaultProfile() string {
 }
 
 func Lookup(name string) (profiles.ClientProfile, bool) {
-	p, ok := profiles.MappedTLSClients[name]
+	if p, ok := profiles.MappedTLSClients[name]; ok {
+		return p, true
+	}
+	p, ok := extraProfiles[name]
 	return p, ok
 }
 
@@ -52,22 +62,7 @@ func WithClientHello(base profiles.ClientProfile, spec *utls.ClientHelloSpec) pr
 		Version:     "1",
 		SpecFactory: func() (utls.ClientHelloSpec, error) { return *spec, nil },
 	}
-	return profiles.NewClientProfile(
-		id,
-		base.GetSettings(),
-		base.GetSettingsOrder(),
-		base.GetPseudoHeaderOrder(),
-		base.GetConnectionFlow(),
-		base.GetPriorities(),
-		base.GetHeaderPriority(),
-		base.GetStreamID(),
-		base.GetAllowHTTP(),
-		base.GetHttp3Settings(),
-		base.GetHttp3SettingsOrder(),
-		base.GetHttp3PriorityParam(),
-		base.GetHttp3PseudoHeaderOrder(),
-		base.GetHttp3SendGreaseFrames(),
-	)
+	return withHello(base, id)
 }
 
 // HasDirectSpec reports whether a profile can produce a ClientHelloSpec on its
